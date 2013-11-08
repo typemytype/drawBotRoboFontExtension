@@ -48,6 +48,12 @@ class BezierPath(object):
 
     curveto = curveTo
 
+    def arcTo(self, pt1, pt2, radius):
+        """
+        Arc from one point to an other point with a given `radius`.
+        """
+        self._path.appendBezierPathWithArcFromPoint_toPoint_radius_(pt1, pt2, radius)
+
     def closePath(self):
         """
         Close the path.
@@ -166,7 +172,9 @@ class Color(object):
 
 class CMYKColor(Color):
 
-    def __init__(self, c, m, y, k, a=1):
+    def __init__(self, c=None, m=None, y=None, k=None, a=1):
+        if c is None:
+            return
         if isinstance(c, AppKit.NSColor):
             self._color = c.colorUsingColorSpaceName_("NSDeviceCMYKColorSpace")
         else:
@@ -243,7 +251,7 @@ class Text(object):
     def _get_font(self):
         _font = AppKit.NSFont.fontWithName_size_(self._fontName, self.fontSize)
         if _font == None:
-            warnings.warn("font: %s is not installed, back to the falllback font: %s" % (self._fontName, self._backupFont))
+            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._fontName, self._backupFont))
             self._fontName = self._backupFont
             _font = AppKit.NSFont.fontWithName_size_(self._backupFont, self.fontSize)
         return _font
@@ -467,6 +475,9 @@ class BaseContext(object):
     def curveTo(self, pt1, pt2, pt):
         self._state.path.curveTo(pt1, pt2, pt)
     
+    def arcTo(self, pt1, pt2, radius):
+        self._state.path.arcTo(pt1, pt2, radius)
+
     def closePath(self):
         self._state.path.closePath()
     
