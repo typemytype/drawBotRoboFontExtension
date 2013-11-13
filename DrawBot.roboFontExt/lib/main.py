@@ -289,6 +289,8 @@ class DrawBotController(BaseWindowController):
         """
         return self.codeView.get()
     
+    getText = code
+
     def setCode(self, code):
         """
         Sets code in to the code view.
