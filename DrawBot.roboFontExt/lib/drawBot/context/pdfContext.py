@@ -5,9 +5,7 @@ import Quartz
 import os
 
 from baseContext import BaseContext
-from drawBot.misc import optimizePath
-
-_cachedImages = {}
+from drawBot.misc import DrawBotError
 
 class PDFContext(BaseContext):
     
@@ -15,7 +13,8 @@ class PDFContext(BaseContext):
 
     def __init__(self):
         super(PDFContext, self).__init__()
-        self._hasContext = False        
+        self._hasContext = False  
+        self._cachedImages = {}     
 
     def _newPage(self, width, height):
         self.size(width, height)
@@ -160,19 +159,18 @@ class PDFContext(BaseContext):
             self._restore()
 
     def _getImageSource(self, key):
-        if key not in _cachedImages:
+        if key not in self._cachedImages:
             path = key
             if path.startswith("http"):
                 url = AppKit.NSURL.URLWithString_(path)
             else:
-                path = optimizePath(path)
                 url = AppKit.NSURL.fileURLWithPath_(path)
             source = Quartz.CGImageSourceCreateWithURL(url, None)
             if source is not None:
-                _cachedImages[key] = Quartz.CGImageSourceCreateImageAtIndex(source, 0, None)
+                self._cachedImages[key] = Quartz.CGImageSourceCreateImageAtIndex(source, 0, None)
             else:
-                return None
-        return _cachedImages[key]
+                raise DrawBotError, "No image found at %s" % key
+        return self._cachedImages[key]
 
     def _image(self, path, (x, y), alpha):
         self._save()
