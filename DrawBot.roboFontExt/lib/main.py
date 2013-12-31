@@ -310,7 +310,6 @@ class DrawBotController(BaseWindowController):
         documentClass = documentController.documentClassForType_("Python Source File")
         document = documentClass.alloc().init()
         document.vanillaWindowController = self
-        document.windowController = self
         documentController.addDocument_(document)
         document.addWindowController_(self.w.getNSWindowController())
         
@@ -371,9 +370,11 @@ class DrawBotController(BaseWindowController):
     
     def toolbarOpen(self, sender):
         self.codeView.open()
-    
+        self.document().windowController = self
+
     def toolbarNewScript(self, sender):
         self.codeView.newScript()
+        self.document().windowController = self
     
     def toolbarSavePDF(self, sender):
         self.savePDF()
