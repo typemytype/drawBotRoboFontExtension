@@ -28,16 +28,16 @@ def drawGlyph(glyph):
     pen = CocoaPen(glyph.getParent())
     glyph.draw(pen)
     _drawBotDrawingTool.drawPath(pen.path)
-    
+
 _drawBotDrawingTool.drawGlyph = drawGlyph
 
 class RFBezierPath(BezierPath):
-    
+
     def addGlyph(self, glyph):
         pen = CocoaPen(glyph.getParent())
         glyph.draw(pen)
         self.getNSBezierPath().appendBezierPath_(pen.path)
-        
+
 _drawBotDrawingTool._bezierPathClass = RFBezierPath
 
 class DrawBotController(BaseWindowController):
@@ -58,7 +58,7 @@ class DrawBotController(BaseWindowController):
             self.w.getNSWindow().setCollectionBehavior_(128) #NSWindowCollectionBehaviorFullScreenPrimary
         except:
             pass
-        
+
         toolbarItems = [
             dict(itemIdentifier="run",
                 label="Run",
@@ -86,7 +86,7 @@ class DrawBotController(BaseWindowController):
                 callback=self.toolbarDedent,
                 ),
             dict(itemIdentifier=NSToolbarFlexibleSpaceItemIdentifier),
-            
+
             dict(itemIdentifier="save",
                 label="Save",
                 imageNamed="toolbarScriptSave",
@@ -97,9 +97,9 @@ class DrawBotController(BaseWindowController):
                 imageObject=createSavePDFImage(),
                 callback=self.toolbarSavePDF,
                 ),
-            
+
             dict(itemIdentifier=NSToolbarSpaceItemIdentifier),
-            
+
             dict(itemIdentifier="reload",
                 label="Reload",
                 imageNamed="toolbarScriptReload",
@@ -118,7 +118,7 @@ class DrawBotController(BaseWindowController):
             dict(itemIdentifier=NSToolbarFlexibleSpaceItemIdentifier),
             ]
         toolbar = self.w.addToolbar(toolbarIdentifier="tinyDrawBotScriptingToolbar", toolbarItems=toolbarItems, addStandardItems=False)
-        
+
         # the code editor
         self.codeView = CodeEditor((0, 0, -0, -0))
         self.codeView.setCallback(self.runCode)
@@ -137,7 +137,7 @@ class DrawBotController(BaseWindowController):
             dict(view=self.outPutView, identifier="outPutView", size=100, minSize=50, canCollapse=False),
         ]
         self.codeSplit = SplitView((0, 0, -0, -0), paneDescriptors, isVertical=False)
-        
+
         # collect the draw scroll view and the code split view in a splitview
         paneDescriptors = [
             dict(view=self.thumbnails, identifier="thumbnails", minSize=100, size=100, maxSize=100),
@@ -145,7 +145,7 @@ class DrawBotController(BaseWindowController):
             dict(view=self.codeSplit, identifier="codeSplit", minSize=50, canCollapse=False),
         ]
         self.w.split = SplitView((0, 0, -0, -0), paneDescriptors)
-        
+
         # setup BaseWindowController base behavoir
         self.setUpBaseWindowBehavior()
 
@@ -155,7 +155,7 @@ class DrawBotController(BaseWindowController):
         self.w.split.setDividerPosition(0, 0)
         self.w.split.setDividerPosition(1, windowWidth * .6)
         self.codeSplit.setDividerPosition(0, windowHeight * .7)
-        
+
     def runCode(self, liveCoding=False):
         # get the code
         code = self.code()
@@ -212,11 +212,11 @@ class DrawBotController(BaseWindowController):
         # reset the code backup if the script runs with any crashes
         setDefault("pythonCodeBackup", None)
         # clean up
-        
+
         self.output = None
         self.stdout = None
         self.stderr = None
-    
+
     def checkSyntax(self, sender=None):
         # get the code
         code = self.code()
@@ -245,14 +245,14 @@ class DrawBotController(BaseWindowController):
         if data:
             # if there is date save it
             data.writeToFile_atomically_(path , False)
-        
+
     def savePDF(self, sender=None):
         """
         Save the content as a pdf.
         """
         # pop up a show put file sheet
         self.showPutFile(["pdf"], callback=self._savePDF)
-        
+
     def setPath(self, path):
         """
         Sets the content of a file into the code view.
@@ -265,10 +265,10 @@ class DrawBotController(BaseWindowController):
         f.close()
         # set the content into the code view
         self.codeView.set(code)
-    
+
     def path(self):
         """
-        Returns the path of the document, 
+        Returns the path of the document,
         return None if the document is never saved before.
         """
         # get the docuemnt
@@ -288,7 +288,7 @@ class DrawBotController(BaseWindowController):
         Returns the content of the code view as a string.
         """
         return self.codeView.get()
-    
+
     getText = code
 
     def setCode(self, code):
@@ -303,7 +303,10 @@ class DrawBotController(BaseWindowController):
         """
         return self.drawView.get()
 
-    # UI 
+    def set(self, path, force=False):
+        self.setPath(path)
+
+    # UI
 
     def open(self):
         documentController = NSDocumentController.sharedDocumentController()
@@ -312,16 +315,16 @@ class DrawBotController(BaseWindowController):
         document.vanillaWindowController = self
         documentController.addDocument_(document)
         document.addWindowController_(self.w.getNSWindowController())
-        
+
         # open the window
         self.w.open()
         # set the code view as first responder
         self.w.getNSWindow().makeFirstResponder_(self.codeView.getNSTextView())
 
     def assignToDocument(self, nsDocument):
-        # assing the window to the document 
+        # assing the window to the document
         self.w.assignToDocument(nsDocument)
-    
+
     def document(self):
         """
         Returns the document.
@@ -336,38 +339,38 @@ class DrawBotController(BaseWindowController):
 
     def windowMoveCallback(self, sender):
         # save the frame in the defaults
-        self.w.getNSWindow().saveFrameUsingName_(self.windowAutoSaveName)    
-        
+        self.w.getNSWindow().saveFrameUsingName_(self.windowAutoSaveName)
+
     def windowResizeCallback(self, sender):
         # save the frame in the defaults
         self.w.getNSWindow().saveFrameUsingName_(self.windowAutoSaveName)
-    
+
     def windowCloseCallback(self, sender):
         # unbind on window close
         self.w.unbind("move", self.windowMoveCallback)
         self.w.unbind("resize", self.windowResizeCallback)
         super(DrawBotController, self).windowCloseCallback(sender)
-        
+
     # toolbar
-    
+
     def toolbarRun(self, sender):
         self.runCode()
-    
+
     def toolbarComment(self, sender):
         self.codeView.comment()
-        
+
     def toolbarUncomment(self, sender):
         self.codeView.uncomment()
-        
+
     def toolbarIndent(self, sender):
         self.codeView.indent()
-        
+
     def toolbarDedent(self, sender):
         self.codeView.dedent()
-    
+
     def toolbarReload(self, sender):
         self.codeView.reload()
-    
+
     def toolbarOpen(self, sender):
         self.codeView.open()
         self.document().windowController = self
@@ -375,14 +378,14 @@ class DrawBotController(BaseWindowController):
     def toolbarNewScript(self, sender):
         self.codeView.newScript()
         self.document().windowController = self
-    
+
     def toolbarSavePDF(self, sender):
         self.savePDF()
-    
+
     def toolbarSave(self, sender):
         if NSEvent.modifierFlags() & NSAlternateKeyMask:
             self.document().saveDocumentAs_(self)
         else:
             self.document().saveDocument_(self)
-            
+
 DrawBotController().open()
