@@ -2,6 +2,7 @@ import AppKit
 
 import math
 import os
+import random
 
 from context import getContextForFileExt
 from context.baseContext import BezierPath, FormattedString
@@ -10,7 +11,6 @@ from context.dummyContext import DummyContext
 from misc import DrawBotError, warnings, VariableController, optimizePath
 import drawBotSettings
 
-import math, random
 
 def _getmodulecontents(module, names=None):
     d = {}
@@ -22,6 +22,8 @@ def _getmodulecontents(module, names=None):
 
 def _deprecatedWarning(txt):
     warnings.warn("lowercase API is deprecated use: '%s'" % txt)
+
+_chachedPixelColorBitmaps = {}
 
 class DrawBotDrawingTool(object):
 
@@ -165,6 +167,7 @@ class DrawBotDrawingTool(object):
 
         * A `pdf` can be multipage. If `multipage` is `False` only the current page is saved.
         * A `mov` will use each page as a frame.
+        * A `gif` can be animated when there are multiple pages and it will use each page as a frame.
         * All images and `svg` formats will only save the current page. If `multipage` is `True` all pages are saved to disk (a page index will be added to the file name).
 
         .. showcode:: /../examples/saveImage.py
@@ -184,7 +187,7 @@ class DrawBotDrawingTool(object):
 
     def saveimage(self, paths):
         _deprecatedWarning("saveImage()")
-        self.saveImage(path)
+        self.saveImage(paths)
 
     # graphic state
 
@@ -330,9 +333,7 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/polygon.py
         """
-        isTuple = False
         if isinstance(x, tuple) and isinstance(y, tuple):
-            isTuple = True
             args = list(args)
             args.insert(0, y)
             x, y = x
@@ -821,7 +822,8 @@ class DrawBotDrawingTool(object):
                 alpha = y
             x, y = x
         else:
-            _deprecatedWarning("image(\"%s\", (%s, %s), alpha=%s)" % (path, x, y, alpha))
+            txt = "image(\"%s\", (%s, %s), alpha=%s)" % (path, x, y, alpha)
+            warnings.warn("deprecated syntax, wrap x and y values in a tuple: '%s'" % txt)
         if alpha is None:
             alpha = 1
         if isinstance(path, (str, unicode)):
@@ -845,12 +847,41 @@ class DrawBotDrawingTool(object):
                 url = AppKit.NSURL.fileURLWithPath_(path)
             source = AppKit.NSImage.alloc().initByReferencingURL_(url)
         w, h = source.size()
-        return w, h
+        return int(w), int(h)
+
+    def imagePixelColor(self, path, (x, y)):
+        """
+        Return the color `r, g, b, a` of an image at a specified `x`, `y` possition.
+
+        .. showcode:: /../examples/pixelColor.py
+        """
+        bitmap = _chachedPixelColorBitmaps.get(path)
+        if bitmap is None:
+            if isinstance(path, AppKit.NSImage):
+                source = path
+            else:
+                if isinstance(path, (str, unicode)):
+                    path = optimizePath(path)
+                if path.startswith("http"):
+                    url = AppKit.NSURL.URLWithString_(path)
+                else:
+                    url = AppKit.NSURL.fileURLWithPath_(path)
+                source = AppKit.NSImage.alloc().initByReferencingURL_(url)
+
+            bitmap = AppKit.NSBitmapImageRep.imageRepWithData_(source.TIFFRepresentation())
+            _chachedPixelColorBitmaps[path] = bitmap
+
+        color = bitmap.colorAtX_y_(x, bitmap.pixelsHigh() - y - 1)
+        if color is None:
+            return None
+        color = color.colorUsingColorSpaceName_("NSCalibratedRGBColorSpace")
+        return color.redComponent(), color.greenComponent(), color.blueComponent(), color.alphaComponent()
+
     # mov
 
     def frameDuration(self, seconds):
         """
-        When exporting to `mov` each frame can have duration set in `seconds`.
+        When exporting to `mov` or `gif` each frame can have duration set in `seconds`.
 
         .. showcode:: /../examples/frameDuration.py
         """
