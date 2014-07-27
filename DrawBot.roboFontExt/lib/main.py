@@ -166,7 +166,7 @@ class DrawBotController(BaseWindowController):
         # reset the internal warning system
         warnings.resetWarnings()
         # reset the drawing tool
-        _drawBotDrawingTool._reset()
+        _drawBotDrawingTool.newDrawing()
         # create a namespace
         namespace = DrawBotNamespace(_drawBotDrawingTool, _drawBotDrawingTool._magicVariables)
         # add the tool callbacks in the name space
