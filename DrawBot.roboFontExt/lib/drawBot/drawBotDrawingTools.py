@@ -249,6 +249,17 @@ class DrawBotDrawingTool(object):
         self._drawInContext(context)
         context.printImage()
 
+    def pdfImage(self, multipage=None):
+        """
+        Return the image as a pdf document object.
+
+        * A `pdf` can be multipage. If `multipage` is `False` only the current page is returned.
+        """
+        from context.drawBotContext import DrawBotContext
+        context = DrawBotContext()
+        self._drawInContext(context, multipage)
+        return context.getNSPDFDocument()
+
     # graphic state
 
     def save(self):
@@ -896,6 +907,31 @@ class DrawBotDrawingTool(object):
             Return the size of the string.
 
         .. showcode:: /../examples/formattedString.py
+
+        .. function:: formattedString.fontAscender()
+
+            Returns the current font ascender, based on the current `font` and `fontSize`.
+
+        .. function:: formattedString.fontDescender()
+
+            Returns the current font descender, based on the current `font` and `fontSize`.
+
+        .. function:: formattedString.fontXHeight()
+
+            Returns the current font x-height, based on the current `font` and `fontSize`.
+
+        .. function:: formattedString.fontCapHeight() 
+        
+            Returns the current font cap height, based on the current `font` and `fontSize`.
+
+        .. function:: formattedString.fontLeading()
+
+            Returns the current font leading, based on the current `font` and `fontSize`.
+        
+        .. function:: formattedString.fontLineHeight()
+
+            Returns the current line height, based on the current `font` and `fontSize`.
+            If a `lineHeight` is set, this value will be returned.   
         """
         return self._formattedStringClass(*args, **kwargs)
 
@@ -1006,6 +1042,45 @@ class DrawBotDrawingTool(object):
     def installedfonts(self):
         _deprecatedWarningLowercase("installedFonts()")
         return self.installedFonts()
+
+    def fontAscender(self):
+        """
+        Returns the current font ascender, based on the current `font` and `fontSize`.
+        """
+        return self._dummyContext._state.text.font.ascender()
+
+    def fontDescender(self):
+        """
+        Returns the current font descender, based on the current `font` and `fontSize`.
+        """
+        return self._dummyContext._state.text.font.descender()        
+
+    def fontXHeight(self):
+        """
+        Returns the current font x-height, based on the current `font` and `fontSize`.
+        """
+        return self._dummyContext._state.text.font.xHeight()
+
+    def fontCapHeight(self):
+        """
+        Returns the current font cap height, based on the current `font` and `fontSize`.
+        """
+        return self._dummyContext._state.text.font.capHeight()
+
+    def fontLeading(self):
+        """
+        Returns the current font leading, based on the current `font` and `fontSize`.
+        """
+        return self._dummyContext._state.text.font.leading()
+
+    def fontLineHeight(self):
+        """
+        Returns the current line height, based on the current `font` and `fontSize`.
+        If a `lineHeight` is set, this value will be returned.
+        """    
+        if self._dummyContext._state.text._lineHeight is not None:
+            return self._dummyContext._state.text._lineHeight
+        return self._dummyContext._state.text.font.defaultLineHeightForFont()
 
     _bezierPathClass = BezierPath
 
