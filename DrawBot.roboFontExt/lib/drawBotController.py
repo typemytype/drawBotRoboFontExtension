@@ -6,8 +6,6 @@ import traceback
 from vanilla import *
 from defconAppKit.windows.baseWindow import BaseWindowController
 
-from fontTools.pens.cocoaPen import CocoaPen
-
 from lib.scripting.codeEditor import OutPutEditor
 from lib.scripting.scriptTools import ScriptRunner
 from lib.tools.defaults import getDefault, setDefault
@@ -16,7 +14,6 @@ from drawBot.ui.drawView import DrawView, ThumbnailView
 
 from drawBot.drawBotDrawingTools import _drawBotDrawingTool
 from drawBot.context.drawBotContext import DrawBotContext
-from drawBot.context.baseContext import BezierPath
 
 from drawBot.misc import warnings
 from drawBot.ui.splitView import SplitView
@@ -24,21 +21,6 @@ from drawBot.ui.splitView import SplitView
 from drawBotViews import CodeEditor
 from drawBotTools import StdOutput, DrawBotNamespace, CallbackRunner, createSavePDFImage
 
-def drawGlyph(glyph):
-    pen = CocoaPen(glyph.getParent())
-    glyph.draw(pen)
-    _drawBotDrawingTool.drawPath(pen.path)
-
-_drawBotDrawingTool.drawGlyph = drawGlyph
-
-class RFBezierPath(BezierPath):
-
-    def addGlyph(self, glyph):
-        pen = CocoaPen(glyph.getParent())
-        glyph.draw(pen)
-        self.getNSBezierPath().appendBezierPath_(pen.path)
-
-_drawBotDrawingTool._bezierPathClass = RFBezierPath
 
 class DrawBotController(BaseWindowController):
 
@@ -308,14 +290,15 @@ class DrawBotController(BaseWindowController):
 
     # UI
 
-    def open(self):
+    def open(self, path=None):
         documentController = NSDocumentController.sharedDocumentController()
         documentClass = documentController.documentClassForType_("Python Source File")
         document = documentClass.alloc().init()
         document.vanillaWindowController = self
         documentController.addDocument_(document)
         document.addWindowController_(self.w.getNSWindowController())
-
+        if path:
+            self.codeView.openFile(path)
         # open the window
         self.w.open()
         # set the code view as first responder
@@ -387,5 +370,3 @@ class DrawBotController(BaseWindowController):
             self.document().saveDocumentAs_(self)
         else:
             self.document().saveDocument_(self)
-
-DrawBotController().open()
