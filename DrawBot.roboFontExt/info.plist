@@ -15,6 +15,14 @@
 				<string>D</string>
 			</array>
 		</dict>
+		<dict>
+			<key>path</key>
+			<string>settings.py</string>
+			<key>preferredName</key>
+			<string>Settings</string>
+			<key>shortKey</key>
+			<string></string>
+		</dict>
 	</array>
 	<key>developer</key>
 	<string>DrawBot</string>
@@ -28,15 +36,13 @@
 	<string>installDrawbot.py</string>
 	<key>name</key>
 	<string>DrawBot</string>
-	<key>repository</key>
-	<string>typemytype/RoboFontExtension</string>
 	<key>requiresVersionMajor</key>
 	<string>1</string>
 	<key>requiresVersionMinor</key>
 	<string>5.2</string>
 	<key>timeStamp</key>
-	<real>1383165232.119714</real>
+	<real>1417707288.3324709</real>
 	<key>version</key>
-	<string>1.0</string>
+	<string>1.1</string>
 </dict>
 </plist>
