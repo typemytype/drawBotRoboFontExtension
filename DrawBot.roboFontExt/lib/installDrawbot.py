@@ -50,7 +50,9 @@ class OpenFilesInDrawBotController(object):
         if getExtensionDefault("com.drawBot.openPyFileDirectly", False):
             fileHandler = notification["fileHandler"]
             path = notification["path"]
-            DrawBotController().open(path)
-            fileHandler["opened"] = True
+            _, ext = os.path.splitext(path)
+            if ext.lower() == ".py":
+                DrawBotController().open(path)
+                fileHandler["opened"] = True
 
 OpenFilesInDrawBotController()
