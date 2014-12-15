@@ -44,5 +44,9 @@
 	<real>1417707288.3324709</real>
 	<key>version</key>
 	<string>1.1</string>
+	<key>repository</key>
+    <string>typemytype/drawBotRoboFontExtension</string>
+    <key>extensionPath</key>
+    <string>DrawBot.roboFontExt</string>
 </dict>
 </plist>
