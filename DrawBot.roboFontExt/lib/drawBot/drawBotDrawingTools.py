@@ -102,6 +102,7 @@ class DrawBotDrawingTool(object):
         .. showcode:: /../examples/newDrawing.py
         """
         self._reset()
+        self.installedFonts()
 
     ## magic variables
 
@@ -132,6 +133,15 @@ class DrawBotDrawingTool(object):
         return self.height()
 
     HEIGHT = property(_get_height)
+
+    def sizes(self, paperSize=None):
+        """
+        Returns the width and height of a specified canvas size.
+        If no canvas size is given it will return the dictionary containing all possible page sizes.
+        """
+        if paperSize:
+            return _paperSizes[paperSize]
+        return _paperSizes
 
     def pageCount(self):
         """
@@ -273,6 +283,7 @@ class DrawBotDrawingTool(object):
         This will save the state of the canvas (with all the transformations)
         but also the state of the colors, strokes...
         """
+        self._dummyContext.save()
         self._addInstruction("save")
 
     def restore(self):
@@ -281,6 +292,7 @@ class DrawBotDrawingTool(object):
         This will restore the state of the canvas (with all the transformations)
         but also the state of colors, strokes...
         """
+        self._dummyContext.restore()
         self._addInstruction("restore")
 
     # basic shapes
@@ -766,6 +778,15 @@ class DrawBotDrawingTool(object):
         _deprecatedWarningLowercase("lineHeight(%s)" % value)
         self.lineHeight(value)
 
+    def tracking(self, value):
+        """
+        Set the tracking between characters.
+
+        .. showcode:: /../examples/tracking.py
+        """
+        self._dummyContext.tracking(value)
+        self._addInstruction("tracking", value)
+
     def hyphenation(self, value):
         """
         Set hyphenation, `True` or `False`.
@@ -808,6 +829,10 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/text.py
         """
+        try:
+            txt = txt.decode("utf-8")
+        except:
+            pass
         if isinstance(x, (tuple, list)):
             x, y = x
         else:
@@ -829,7 +854,7 @@ class DrawBotDrawingTool(object):
         """
         Draw a text in a provided rectangle.
         Optionally an alignment can be set.
-        Possible `align` values are: `"left"`, `"center"` and `"right"`.
+        Possible `align` values are: `"left"`, `"center"`, `"right"` and `"justified"`.
 
         If the text overflows the rectangle, the overflowed text is returned.
 
@@ -837,6 +862,10 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/textBox.py
         """
+        try:
+            txt = txt.decode("utf-8")
+        except:
+            pass
         if align is None:
             align = "left"
         elif align not in self._dummyContext._textAlignMap.keys():
@@ -931,6 +960,10 @@ class DrawBotDrawingTool(object):
         .. function:: formattedString.lineHeight(value)
 
             Set the line height.
+
+        .. function:: formattedString.tracking(value)
+
+            Set the tracking between characters.
 
         .. function:: formattedString.openTypeFeatures(frac=True, case=True, ...)
 
@@ -1169,9 +1202,11 @@ class DrawBotDrawingTool(object):
 
             Add a oval at possition `x`, `y` with a size of `w`, `h`
 
-        .. function:: bezierPath.text(txt, font=None, fontSize=10, offset=None)
+        .. function:: bezierPath.text(txt, font=None, fontSize=10, offset=None, box=None)
 
-            Draws a `text` with a `font` and `fontSize` at an `offset` in the bezier path.
+            Draws a `txt` with a `font` and `fontSize` at an `offset` in the bezier path.
+
+            Optionally `txt` can be a `FormattedString` and be drawn inside a `box`, a tuple of (x, y, width, height).
 
         .. function:: bezierPath.pointInside((x, y))
 
