@@ -9,11 +9,23 @@ from tools import openType
 _FALLBACKFONT = "LucidaGrande"
 
 
+class BezierContour(list):
+
+    def __init__(self, *args, **kwargs):
+        super(BezierContour, self).__init__(*args, **kwargs)
+        self.open = True
+
+    def __repr__(self):
+        return "<BezierContour>"
+
+
 class BezierPath(object):
 
     """
     A bezier path object, if you want to draw the same over and over again.
     """
+
+    contourClass = BezierContour
 
     def __init__(self, path=None):
         if path is None:
@@ -211,8 +223,10 @@ class BezierPath(object):
         contours = []
         for index in range(self._path.elementCount()):
             instruction, pts = self._path.elementAtIndex_associatedPoints_(index)
-            if instruction == 0:
-                contours.append([])
+            if instruction == AppKit.NSMoveToBezierPathElement:
+                contours.append(self.contourClass())
+            if instruction == AppKit.NSClosePathBezierPathElement:
+                contours[-1].open = False
             if pts:
                 contours[-1].append([(p.x, p.y) for p in pts])
         if len(contours) >= 2 and len(contours[-1]) == 1 and contours[-1][0] == contours[-2][0]:
@@ -298,7 +312,7 @@ class Color(object):
 
 class CMYKColor(Color):
 
-    colorSpace = AppKit.NSColorSpace.genericCMYKColorSpace()
+    colorSpace = AppKit.NSColorSpace.genericCMYKColorSpace
 
     def __init__(self, c=None, m=None, y=None, k=None, a=1):
         if c is None:
@@ -307,7 +321,7 @@ class CMYKColor(Color):
             self._color = c
         else:
             self._color = AppKit.NSColor.colorWithDeviceCyan_magenta_yellow_black_alpha_(c, m, y, k, a)
-        self._color = self._color.colorUsingColorSpace_(self.colorSpace)
+        self._color = self._color.colorUsingColorSpace_(self.colorSpace())
 
 
 class Shadow(object):
@@ -993,7 +1007,7 @@ class GraphicsState(object):
 
     def setColorSpace(self, colorSpace):
         self.colorSpace = colorSpace
-        self.updateColorSpace()
+        self.updateColorSpace(None)
 
     def updateColorSpace(self, context):
         self._colorClass.colorSpace = self.colorSpace
