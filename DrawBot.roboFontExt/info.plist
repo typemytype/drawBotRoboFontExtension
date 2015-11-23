@@ -28,6 +28,8 @@
 	<string>DrawBot</string>
 	<key>developerURL</key>
 	<string>http://drawbot.com</string>
+	<key>extensionPath</key>
+	<string>DrawBot.roboFontExt</string>
 	<key>html</key>
 	<true/>
 	<key>launchAtStartUp</key>
@@ -36,17 +38,15 @@
 	<string>installDrawbot.py</string>
 	<key>name</key>
 	<string>DrawBot</string>
+	<key>repository</key>
+	<string>typemytype/drawBotRoboFontExtension</string>
 	<key>requiresVersionMajor</key>
 	<string>1</string>
 	<key>requiresVersionMinor</key>
 	<string>5.2</string>
 	<key>timeStamp</key>
-	<real>1417707288.3324709</real>
+	<real>1417707288.332471</real>
 	<key>version</key>
-	<string>1.8</string>
-	<key>repository</key>
-    <string>typemytype/drawBotRoboFontExtension</string>
-    <key>extensionPath</key>
-    <string>DrawBot.roboFontExt</string>
+	<string>3.65</string>
 </dict>
 </plist>
