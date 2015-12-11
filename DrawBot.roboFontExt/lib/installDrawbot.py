@@ -6,7 +6,7 @@ from fontTools.pens.cocoaPen import CocoaPen
 from drawBot.drawBotDrawingTools import _drawBotDrawingTool
 from drawBot.context.baseContext import BezierPath
 from drawBot.context import subscribeContext
-
+from drawBot.context.gifContext import gifsiclePath
 
 from mojo.events import addObserver
 from mojo.extensions import getExtensionDefault
@@ -17,6 +17,8 @@ import glyphContext
 # add drawBot to the sys path
 sys.path.append(os.path.dirname(__file__))
 
+# set the gifsicle tool as executable
+os.chmod(gifsiclePath, 0755)
 
 # add a drawGlyph callback
 def drawGlyph(glyph):
