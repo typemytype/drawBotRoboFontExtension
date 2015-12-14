@@ -184,7 +184,8 @@ class DrawBotController(BaseWindowController):
         else:
             # if the panes are not visible, clear the draw view
             self.drawView.setPDFDocument(None)
-
+        # drawing is done
+        _drawBotDrawingTool.endDrawing()
         # set the catched print statements and tracebacks in the the output text view
         for text, isError in self.output:
             if liveCoding and isError:
