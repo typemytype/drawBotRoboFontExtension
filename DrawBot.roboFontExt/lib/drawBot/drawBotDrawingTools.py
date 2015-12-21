@@ -116,7 +116,8 @@ class DrawBotDrawingTool(object):
 
     def endDrawing(self):
         """
-        Explicitly tell DrawBot the drawing is done.
+        Explicitly tell drawBot the drawing is done.
+        This is advised when using drawBot as a standalone module.
         """
         self._uninstallAllFonts()
 
@@ -849,6 +850,13 @@ class DrawBotDrawingTool(object):
         self._dummyContext.tracking(value)
         self._addInstruction("tracking", value)
 
+    def baselineShift(self, value):
+        """
+        Set the shift of the baseline.
+        """
+        self._dummyContext.baselineShift(value)
+        self._addInstruction("baselineShift", value)
+
     def hyphenation(self, value):
         """
         Set hyphenation, `True` or `False`.
@@ -1027,6 +1035,10 @@ class DrawBotDrawingTool(object):
 
             Set the tracking between characters.
 
+        .. function:: formattedString.baselineShift(value)
+
+            Set the shift of the baseline.
+
         .. function:: formattedString.openTypeFeatures(frac=True, case=True, ...)
 
             Enable OpenType features.
@@ -1191,7 +1203,15 @@ class DrawBotDrawingTool(object):
 
     def installFont(self, path):
         """
-        Install a font with a given path.
+        Install a font with a given path and the postscript font name will be returned.
+        The postscript font name can be used to set the font as the active font.
+
+        Fonts are installed only for the current process.
+        Fonts will not be accesible outside the scope of drawBot.
+
+        All installed fonts will automatically be uninstalled when the script is done.
+
+        .. showcode:: /../examples/installFont.py
         """
         success, error = self._dummyContext.installFont(path)
         self._installedFontPaths.add(path)
@@ -1218,7 +1238,6 @@ class DrawBotDrawingTool(object):
     def uninstallFont(self, path):
         """
         Uninstall a font with a given path.
-        All installed fonts will automatically be uninstalled when the script is done.
         """
         succes, error = self._dummyContext.uninstallFont(path)
         if not succes:
