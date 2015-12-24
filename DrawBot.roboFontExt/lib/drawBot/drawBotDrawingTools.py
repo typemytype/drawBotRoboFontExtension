@@ -11,6 +11,7 @@ from context.baseContext import BezierPath, FormattedString
 from context.dummyContext import DummyContext
 
 from context.tools import openType
+from context.tools.imageObject import ImageObject
 
 from misc import DrawBotError, warnings, VariableController, optimizePath
 
@@ -98,12 +99,28 @@ class DrawBotDrawingTool(object):
             attr = getattr(context, callback)
             attr(*args, **kwargs)
 
-    def _reset(self):
-        self._instructionsStack = []
-        self._dummyContext = DummyContext()
-        self._width = None
-        self._height = None
-        self._installedFontPaths = set()
+    def _reset(self, other=None):
+        if other is not None:
+            self._instructionsStack = list(other._instructionsStack)
+            self._dummyContext = other._dummyContext
+            self._width = other._width
+            self._height = other._height
+            self._installedFontPaths = set(other._installedFontPaths)
+        else:
+            self._instructionsStack = []
+            self._dummyContext = DummyContext()
+            self._width = None
+            self._height = None
+            self._installedFontPaths = set()
+
+    def _copy(self):
+        new = self.__class__()
+        new._instructionsStack = list(self._instructionsStack)
+        new._dummyContext = self._dummyContext
+        new._width = self._width
+        new._height = self._height
+        new._installedFontPaths = set(self._installedFontPaths)
+        return new
 
     def newDrawing(self):
         """
@@ -196,7 +213,7 @@ class DrawBotDrawingTool(object):
         Afterwards the functions `width()` and `height()` can be used for calculations.
 
         It is advised to use `size()` always at the top of the script and not use `size()`
-        in a multiple page document as a `newPage(w, h)` set the correct dimentions directly.
+        in a multiple page document use `newPage(w, h)` to set the correct dimentions directly.
 
         .. showcode:: /../examples/size.py
 
@@ -211,7 +228,7 @@ class DrawBotDrawingTool(object):
         if not self._instructionsStack:
             self.newPage(width, height)
         else:
-            self._addInstruction("size", width, height)
+            raise DrawBotError("It is advised to use 'size()' at the top of a script.")
 
     def newPage(self, width=None, height=None):
         """
@@ -953,152 +970,23 @@ class DrawBotDrawingTool(object):
         """
         Return a string object that can handle text formatting.
 
-        This is a reusable object, if you want to draw the same over and over again.
-        FormattedString objects can be drawn with the `text(txt, (x, y))` and `textBox(txt, (x, y, w, h))` methods.
-
-        **FormattedString methods**
-
-        .. function:: formattedString.append(txt, font=None, fontSize=None, fill=None, cmykFill=None, stroke=None, cmykStroke=None, strokeWidth=None, align=None, lineHeight=None)
-
-            Add `txt` to the formatted string with some additional formatting attributes for the given text:
-
-            * `font`: the font to be used
-            * `fontSize`: the font size
-            * `fill`: the fill color
-            * `cmykFill`: the cmyk fill color
-            * `stroke`: the stroke color
-            * `cmykStroke`: the cmyk stroke color
-            * `strokeWidth`: the stroke width
-            * `align`: the alignment of the text
-            * `lineHeight`: the line height
-            * `openTypeFeatures`: enable OpenType features
-
-            All formatting attributes follow the same notation as other similar DrawBot methods.
-            A color is a tuple of `(r, g, b, alpha)` and a cmykColor is a tuple of `(c, m, y, k, alpha)`.
-
-            Text can also be added with `formattedString += "hello"`. This will append the text with the current settings of the formatted string.
-
-        .. function:: formattedString.font(fontName, fontSize=None)
-
-            Set a font with the name of the font.
-            Optionally a `fontSize` can be set directly.
-            The default font, also used as fallback font, is 'LucidaGrande'.
-            The default `fontSize` is 10pt.
-
-            The name of the font relates to the font's PostScript name.
-
-        .. function:: formattedString.fontSize(fontSize)
-
-            Set the font size in points.
-            The default `fontSize` is 10pt.
-
-        .. function:: formattedString.fallbackFont(fontName)
-
-            Set a fallback font, this is used whenever a glyph is not available in the current font.
-
-        .. function:: formattedString.fill(r, g, b, a)
-
-            Sets the fill color with a `red`, `green`, `blue` and `alpha` value.
-            Each argument must a value float between 0 and 1.
-
-        .. function:: formattedString.stroke(r, g, b, a)
-
-            Sets the stroke color with a `red`, `green`, `blue` and `alpha` value.
-            Each argument must a value float between 0 and 1.
-
-        .. function:: formattedString.cmykFill(c, m, y, k, a)
-
-            Set a fill using a CMYK color before drawing a shape. This is handy if the file is intended for print.
-
-            Sets the CMYK fill color. Each value must be a float between 0.0 and 1.0.
-
-        .. function:: formattedString.cmykStroke(c, m, y, k, a)
-
-            Set a stroke using a CMYK color before drawing a shape. This is handy if the file is intended for print.
-
-            Sets the CMYK stroke color. Each value must be a float between 0.0 and 1.0.
-
-        .. function:: formattedString.strokeWidth(value)
-
-            Sets the stroke width.
-
-        .. function:: formattedString.align(align)
-
-            Sets the text alignment.
-            Possible `align` values are: `left`, `center` and `right`.
-
-        .. function:: formattedString.lineHeight(value)
-
-            Set the line height.
-
-        .. function:: formattedString.tracking(value)
-
-            Set the tracking between characters.
-
-        .. function:: formattedString.baselineShift(value)
-
-            Set the shift of the baseline.
-
-        .. function:: formattedString.openTypeFeatures(frac=True, case=True, ...)
-
-            Enable OpenType features.
-
-        .. showcode:: /../examples/openTypeFeaturesFromattedString.py
-
-        .. function:: formattedString.listOpenTypeFeatures(fontName=None)
-
-            List all OpenType feature tags for the current font.
-
-            Optionally a `fontName` can be given.
-
-        .. function:: formattedString.size()
-
-            Return the size of the string.
-
-        .. showcode:: /../examples/formattedString.py
-
-        .. function:: formattedString.fontAscender()
-
-            Returns the current font ascender, based on the current `font` and `fontSize`.
-
-        .. function:: formattedString.fontDescender()
-
-            Returns the current font descender, based on the current `font` and `fontSize`.
-
-        .. function:: formattedString.fontXHeight()
-
-            Returns the current font x-height, based on the current `font` and `fontSize`.
-
-        .. function:: formattedString.fontCapHeight()
-
-            Returns the current font cap height, based on the current `font` and `fontSize`.
-
-        .. function:: formattedString.fontLeading()
-
-            Returns the current font leading, based on the current `font` and `fontSize`.
-
-        .. function:: formattedString.fontLineHeight()
-
-            Returns the current line height, based on the current `font` and `fontSize`.
-            If a `lineHeight` is set, this value will be returned.
-
-        .. function:: formattedString.appendGlyph(glyphName1, glyphName2, ...)
-
-            Appends a glyph by his glyph name using the current `font`.
-
         .. showcode:: /../examples/appendGlyphFormattedString.py
 
+        .. autoclass:: drawBot.context.baseContext.FormattedString
+            :members:
         """
         return self._formattedStringClass(*args, **kwargs)
 
     # images
 
-    def image(self, path, x, y=None, alpha=None):
+    def image(self, path, x, y=None, alpha=None, pageNumber=None):
         """
         Add an image from a `path` with an `offset` and an `alpha` value.
         This should accept most common file types like pdf, jpg, png, tiff and gif.
 
         Optionally an `alpha` can be provided, which is a value between 0 and 1.
+
+        Optionally a `pageNumber` can be provided when the path referes to a multi page pdf file.
 
         .. showcode:: /../examples/image.py
         """
@@ -1111,9 +999,11 @@ class DrawBotDrawingTool(object):
 
         if alpha is None:
             alpha = 1
+        if isinstance(path, self._imageClass):
+            path = path._nsImage()
         if isinstance(path, (str, unicode)):
             path = optimizePath(path)
-        self._addInstruction("image", path, (x, y), alpha)
+        self._addInstruction("image", path, (x, y), alpha, pageNumber)
 
     def imageSize(self, path):
         """
@@ -1121,8 +1011,11 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/imageSize.py
         """
+        if isinstance(path, self._imageClass):
+            path = path._nsImage()
         if isinstance(path, AppKit.NSImage):
-            source = path
+            rep = path.TIFFRepresentation()
+            isPDF = False
         else:
             if isinstance(path, (str, unicode)):
                 path = optimizePath(path)
@@ -1132,9 +1025,13 @@ class DrawBotDrawingTool(object):
                 if not os.path.exists(path):
                     raise DrawBotError("Image does not exist")
                 url = AppKit.NSURL.fileURLWithPath_(path)
-            source = AppKit.NSImage.alloc().initByReferencingURL_(url)
-        w, h = source.size()
-        return int(w), int(h)
+            isPDF = AppKit.PDFDocument.alloc().initWithURL_(url) is not None
+            rep = AppKit.NSImageRep.imageRepWithContentsOfURL_(url)
+        if isPDF:
+            w, h = rep.size()
+        else:
+            w, h = rep.pixelsWide(), rep.pixelsHigh()
+        return w, h
 
     def imagePixelColor(self, path, (x, y)):
         """
@@ -1144,7 +1041,9 @@ class DrawBotDrawingTool(object):
         """
         bitmap = _chachedPixelColorBitmaps.get(path)
         if bitmap is None:
-            if isinstance(path, AppKit.NSImage):
+            if isinstance(path, self._imageClass):
+                source = path._nsImage()
+            elif isinstance(path, AppKit.NSImage):
                 source = path
             else:
                 if isinstance(path, (str, unicode)):
@@ -1290,97 +1189,34 @@ class DrawBotDrawingTool(object):
 
     _bezierPathClass = BezierPath
 
-    def BezierPath(self):
+    def BezierPath(self, path=None):
         """
         Return a BezierPath object.
         This is a reusable object, if you want to draw the same over and over again.
 
-        **BezierPath methods**
-
-        .. function:: bezierPath.moveTo((x, y))
-
-            Move to a point `x`, `y`.
-
-        .. function:: bezierPath.lineTo((x, y))
-
-            Line to a point `x`, `y`.
-
-        .. function:: bezierPath.curveTo((x1, y1), (x2, y2), (x3, y3))
-
-            Curve to a point `x3`, `y3`.
-            With given bezier handles `x1`, `y1` and `x2`, `y2`.
-
-        .. function:: bezierPath.arc(center, radius, startAngle, endAngle, clockwise)
-
-            Arc with `center` and a given `radius`, from `startAngle` to `endAngle`, going clockwise if `clockwise` is True and counter clockwise if `clockwise` is False.
-
-        .. function:: bezierPath.arcTo((x1, y1), (x2, y2), radius)
-
-            Arc from one point to an other point with a given `radius`
-
-        .. function:: bezierPath.closePath()
-
-            Close the path.
-
-        .. function:: bezierPath.rect(x, y, w, h)
-
-            Add a rectangle at possition `x`, `y` with a size of `w`, `h`
-
-        .. function:: bezierPath.oval(x, y, w, h)
-
-            Add a oval at possition `x`, `y` with a size of `w`, `h`
-
-        .. function:: bezierPath.text(txt, font=None, fontSize=10, offset=None, box=None)
-
-            Draws a `txt` with a `font` and `fontSize` at an `offset` in the bezier path.
-
-            Optionally `txt` can be a `FormattedString` and be drawn inside a `box`, a tuple of (x, y, width, height).
-
-        .. function:: bezierPath.pointInside((x, y))
-
-            Check if a point `x`, `y` is inside a path.
-
-        .. function:: bezierPath.bounds()
-
-            Return the bounding box of the path as `x`, `y`, `width`, `height`.
-
-        .. function:: bezierPath.controlPointBounds()
-
-            Return the bounding box of the path including the offcurve points as `x`, `y`, `width`, `height`.
-
-        .. function:: bezierPath.copy()
-
-            Copy the bezier path.
-
-
-        |
-
-        **BezierPath attributes**
-
-        .. attribute:: bezierPath.points
-
-            Return a list of all points.
-
-        .. attribute:: bezierPath.onCurvePoints
-
-            Return a list of all on-curve points.
-
-        .. attribute:: bezierPath.offCurvePoints
-
-            Return a list of all off-curve points.
-
-        .. attribute:: bezierPath.contours
-
-            Return a list of contours with all point coordinates sorted in segments.
-            Each contour object has a `contour.open` attribute, indecating if a contour is open or closed.
-
         .. showcode:: /../examples/bezierPath.py
-        """
-        return self._bezierPathClass()
 
-    def Bezierpath(self):
+        .. autoclass:: drawBot.context.baseContext.BezierPath
+            :members:
+        """
+        return self._bezierPathClass(path)
+
+    def Bezierpath(self, path=None):
         _deprecatedWarningLowercase("BezierPath()")
         return self.BezierPath()
+
+    _imageClass = ImageObject
+
+    def ImageObject(self, path=None):
+        """
+        Return a Image object, packed with filters.
+        This is a reusable object.
+
+        .. autoclass:: drawBot.context.tools.imageObject.ImageObject
+            :members:
+
+        """
+        return self._imageClass(path)
 
     def Variable(self, variables, workSpace):
         """
