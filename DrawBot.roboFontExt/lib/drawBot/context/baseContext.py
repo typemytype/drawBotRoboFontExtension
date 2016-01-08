@@ -9,6 +9,11 @@ from tools import openType
 _FALLBACKFONT = "LucidaGrande"
 
 
+def _tryInstallFontFromFontName(fontName):
+    from drawBot.drawBotDrawingTools import _drawBotDrawingTool
+    return _drawBotDrawingTool._tryInstallFontFromFontName(fontName)
+
+
 class BezierContour(list):
 
     """
@@ -112,6 +117,7 @@ class BezierPath(object):
     def text(self, txt, font=_FALLBACKFONT, fontSize=10, offset=None, box=None):
         """
         Draws a `txt` with a `font` and `fontSize` at an `offset` in the bezier path.
+        If a font path is given the font will be installed and used directly.
 
         Optionally `txt` can be a `FormattedString` and be drawn inside a `box`, a tuple of (x, y, width, height).
         """
@@ -122,7 +128,7 @@ class BezierPath(object):
         if isinstance(txt, FormattedString):
             attributedString = txt.getNSObject()
         else:
-            fontName = font
+            fontName = _tryInstallFontFromFontName(font)
             font = AppKit.NSFont.fontWithName_size_(font, fontSize)
             if font is None:
                 warnings.warn("font: %s is not installed, back to the fallback font: %s" % (fontName, _FALLBACKFONT))
@@ -455,7 +461,7 @@ class FormattedString(object):
         """
         Add `txt` to the formatted string with some additional text formatting attributes:
 
-        * `font`: the font to be used for the given text
+        * `font`: the font to be used for the given text, if a font path is given the font will be installed and used directly.
         * `fallbackFont`: the fallback font
         * `fontSize`: the font size to be used for the given text
         * `fill`: the fill color to be used for the given text
@@ -546,7 +552,7 @@ class FormattedString(object):
             return
         attributes = {}
         if font:
-            fontName = font
+            fontName = _tryInstallFontFromFontName(font)
             font = AppKit.NSFont.fontWithName_size_(fontName, fontSize)
             if font is None:
                 ff = fallbackFont
@@ -652,12 +658,14 @@ class FormattedString(object):
     def font(self, font, fontSize=None):
         """
         Set a font with the name of the font.
+        If a font path is given the font will be installed and used directly.
         Optionally a `fontSize` can be set directly.
         The default font, also used as fallback font, is 'LucidaGrande'.
         The default `fontSize` is 10pt.
 
         The name of the font relates to the font's postscript name.
         """
+        font = _tryInstallFontFromFontName(font)
         font = font.encode("ascii", "ignore")
         self._font = font
         if fontSize is not None:
@@ -666,8 +674,10 @@ class FormattedString(object):
     def fallbackFont(self, font):
         """
         Set a fallback font, used whenever a glyph is not available in the normal font.
+        If a font path is given the font will be installed and used directly.
         """
         if font:
+            font = _tryInstallFontFromFontName(font)
             font = font.encode("ascii", "ignore")
             testFont = AppKit.NSFont.fontWithName_size_(font, self._fontSize)
             if testFont is None:
@@ -759,9 +769,11 @@ class FormattedString(object):
         """
         List all OpenType feature tags for the current font.
 
-        Optionally a `fontName` can be given.
+        Optionally a `fontName` can be given. If a font path is given the font will be installed and used directly.
         """
-        if fontName is None:
+        if fontName:
+            fontName = _tryInstallFontFromFontName(fontName)
+        else:
             fontName = self._font
         return openType.getFeatureTagsForFontName(fontName)
 
@@ -1554,3 +1566,19 @@ class BaseContext(object):
         if not success:
             error = error.localizedDescription()
         return success, error
+
+    def _fontNameForPath(self, path):
+        from fontTools.ttLib import TTFont, TTLibError
+        try:
+            font = TTFont(path, fontNumber=0)  # in case of .ttc, use the first font
+            psName = font["name"].getName(6, 1, 0)
+            if psName is None:
+                psName = font["name"].getName(6, 3, 1)
+            font.close()
+        except IOError:
+            raise DrawBotError("Font '%s' does not exist." % path)
+        except TTLibError:
+            raise DrawBotError("Font '%s' is not a valid font." % path)
+        if psName is not None:
+            psName = psName.toUnicode()
+        return psName

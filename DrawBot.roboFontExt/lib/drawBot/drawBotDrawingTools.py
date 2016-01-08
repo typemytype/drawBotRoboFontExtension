@@ -105,13 +105,14 @@ class DrawBotDrawingTool(object):
             self._dummyContext = other._dummyContext
             self._width = other._width
             self._height = other._height
-            self._installedFontPaths = set(other._installedFontPaths)
+            self._tempInstalledFonts = dict(other._tempInstalledFonts)
         else:
             self._instructionsStack = []
             self._dummyContext = DummyContext()
             self._width = None
             self._height = None
-            self._installedFontPaths = set()
+            if not hasattr(self, "_tempInstalledFonts"):
+                self._tempInstalledFonts = dict()
 
     def _copy(self):
         new = self.__class__()
@@ -119,7 +120,7 @@ class DrawBotDrawingTool(object):
         new._dummyContext = self._dummyContext
         new._width = self._width
         new._height = self._height
-        new._installedFontPaths = set(self._installedFontPaths)
+        new._tempInstalledFonts = dict(self._tempInstalledFonts)
         return new
 
     def newDrawing(self):
@@ -800,6 +801,7 @@ class DrawBotDrawingTool(object):
     def font(self, fontName, fontSize=None):
         """
         Set a font with the name of the font.
+        If a font path is given the font will be installed and used directly.
         Optionally a `fontSize` can be set directly.
         The default font, also used as fallback font, is 'LucidaGrande'.
         The default `fontSize` is 10pt.
@@ -810,6 +812,7 @@ class DrawBotDrawingTool(object):
 
             font("Times-Italic")
         """
+        fontName = self._tryInstallFontFromFontName(fontName)
         fontName = fontName.encode("ascii", "ignore")
         self._dummyContext.font(fontName, fontSize)
         self._addInstruction("font", fontName, fontSize)
@@ -902,9 +905,11 @@ class DrawBotDrawingTool(object):
         """
         List all OpenType feature tags for the current font.
 
-        Optionally a `fontName` can be given.
+        Optionally a `fontName` can be given. If a font path is given the font will be installed and used directly.
         """
-        if fontName is None:
+        if fontName:
+            fontName = self._tryInstallFontFromFontName(fontName)
+        else:
             fontName = self._dummyContext._state.text.fontName
         return openType.getFeatureTagsForFontName(fontName)
 
@@ -920,10 +925,10 @@ class DrawBotDrawingTool(object):
             txt = txt.decode("utf-8")
         except:
             pass
-        if isinstance(x, (tuple, list)):
+        if y is None:
             x, y = x
         else:
-            warnings.warn("postion must a tuple: text('%s', (%s, %s))" % (txt, x, y))
+            warnings.warn("position must a tuple: text('%s', (%s, %s))" % (txt, x, y))
         attrString = self._dummyContext.attributedString(txt)
         w, h = attrString.size()
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
@@ -1112,23 +1117,15 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/installFont.py
         """
+        if path in self._tempInstalledFonts:
+            return self._tempInstalledFonts[path]
+
         success, error = self._dummyContext.installFont(path)
-        self._installedFontPaths.add(path)
+        print "send installfont to contexts"
         self._addInstruction("installFont", path)
 
-        from fontTools.ttLib import TTFont, TTLibError
-        try:
-            font = TTFont(path)
-            psName = font["name"].getName(6, 1, 0)
-            if psName is None:
-                psName = font["name"].getName(6, 3, 1)
-            font.close()
-        except IOError:
-            raise DrawBotError("Font '%s' does not exist." % path)
-        except TTLibError:
-            raise DrawBotError("Font '%s' is not a valid font." % path)
-        if psName is not None:
-            psName = psName.toUnicode()
+        psName = self._dummyContext._fontNameForPath(path)
+        self._tempInstalledFonts[path] = psName
 
         if not success:
             warnings.warn("install font: %s" % error)
@@ -1138,15 +1135,28 @@ class DrawBotDrawingTool(object):
         """
         Uninstall a font with a given path.
         """
-        succes, error = self._dummyContext.uninstallFont(path)
-        if not succes:
+        success, error = self._dummyContext.uninstallFont(path)
+        if path in self._tempInstalledFonts:
+            del self._tempInstalledFonts[path]
+        if not success:
             warnings.warn("uninstall font: %s" % error)
         self._addInstruction("uninstallFont", path)
 
     def _uninstallAllFonts(self):
-        for path in self._installedFontPaths:
+        for path in self._tempInstalledFonts:
             self._dummyContext.uninstallFont(path)
-        self._installedFontPaths = set()
+        self._tempInstalledFonts = dict()
+
+    def _tryInstallFontFromFontName(self, fontName):
+        # check if the fontName is actually a path
+        if os.path.exists(fontName):
+            fontPath = fontName
+            ext = os.path.splitext(fontPath)[1]
+            if ext.lower() in [".otf", ".ttf", ".ttc"]:
+                fontName = self.installFont(fontPath)
+            else:
+                raise DrawBotError("Font '%s' is not .ttf, .otf or .ttc." % fontPath)
+        return fontName
 
     def fontAscender(self):
         """
@@ -1211,6 +1221,8 @@ class DrawBotDrawingTool(object):
         """
         Return a Image object, packed with filters.
         This is a reusable object.
+
+        .. showcode:: /../examples/imageObject.py
 
         .. autoclass:: drawBot.context.tools.imageObject.ImageObject
             :members:
