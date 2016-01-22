@@ -174,6 +174,7 @@ class DrawBotDrawingTool(object):
         Returns the width and height of a specified canvas size.
         If no canvas size is given it will return the dictionary containing all possible page sizes.
         """
+        _paperSizes["screen"] = tuple(AppKit.NSScreen.mainScreen().frame().size)
         if paperSize:
             return _paperSizes[paperSize]
         return _paperSizes
@@ -209,7 +210,7 @@ class DrawBotDrawingTool(object):
         Set the width and height of the canvas.
         Without calling `size()` the default drawing board is 1000 by 1000 points.
 
-        Alternatively `size('A4')` can be used.
+        Alternatively `size('A4')` with a supported papersizes or `size('screen')` setting the current screen size as size, can be used.
 
         Afterwards the functions `width()` and `height()` can be used for calculations.
 
@@ -222,6 +223,8 @@ class DrawBotDrawingTool(object):
         """
         if width in _paperSizes:
             width, height = _paperSizes[width]
+        if width == "screen":
+            width, height = AppKit.NSScreen.mainScreen().frame().size
         if height is None:
             width, height = width
         self._width = width
@@ -239,7 +242,7 @@ class DrawBotDrawingTool(object):
         Optionally a `width` and `height` argument can be provided to set the size.
         If not provided the default size will be used.
 
-        Alternatively `size('A4')` can be used.
+        Alternatively `size('A4')` with a supported papersizes or `size('screen')` setting the current screen size as size, can be used.
 
         .. showcode:: /../examples/newPage.py
 
@@ -247,6 +250,8 @@ class DrawBotDrawingTool(object):
         """
         if width in _paperSizes:
             width, height = _paperSizes[width]
+        if width == "screen":
+            width, height = AppKit.NSScreen.mainScreen().frame().size
         self._width = width
         self._height = height
         self._addInstruction("newPage", width, height)
@@ -468,13 +473,15 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/polygon.py
         """
-        if isinstance(x, tuple) and isinstance(y, tuple):
+        try:
+            a, b = x
+        except TypeError:
+            args = [args[i:i+2] for i in range(0, len(args), 2)]
+            _deprecatedWarningWrapInTuple("polygon((%s, %s), %s)" % (x, y, ", ".join([str(i) for i in args])))
+        else:
             args = list(args)
             args.insert(0, y)
             x, y = x
-        else:
-            args = [args[i:i+2] for i in range(0, len(args), 2)]
-            _deprecatedWarningWrapInTuple("polygon((%s, %s), %s)" % (x, y, ", ".join([str(i) for i in args])))
         if not args:
             raise DrawBotError("polygon() expects more than a single point")
         doClose = kwargs.get("close", True)
@@ -483,8 +490,8 @@ class DrawBotDrawingTool(object):
 
         path = self._bezierPathClass()
         path.moveTo((x, y))
-        for p in args:
-            path.lineTo(p)
+        for x, y in args:
+            path.lineTo((x, y))
         if doClose:
             path.closePath()
         self.drawPath(path)
@@ -921,10 +928,11 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/text.py
         """
-        try:
-            txt = txt.decode("utf-8")
-        except UnicodeEncodeError:
-            pass
+        if isinstance(txt, (str, unicode)):
+            try:
+                txt = txt.decode("utf-8")
+            except UnicodeEncodeError:
+                pass
         if y is None:
             x, y = x
         else:
@@ -954,10 +962,11 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/textBox.py
         """
-        try:
-            txt = txt.decode("utf-8")
-        except UnicodeEncodeError:
-            pass
+        if isinstance(txt, (str, unicode)):
+            try:
+                txt = txt.decode("utf-8")
+            except UnicodeEncodeError:
+                pass
         if align is None:
             align = "left"
         elif align not in self._dummyContext._textAlignMap.keys():
@@ -1089,10 +1098,11 @@ class DrawBotDrawingTool(object):
         Returns the size of a text with the current settings,
         like `font`, `fontSize` and `lineHeight` as a tuple (width, height).
         """
-        try:
-            txt = txt.decode("utf-8")
-        except UnicodeEncodeError:
-            pass
+        if isinstance(txt, (str, unicode)):
+            try:
+                txt = txt.decode("utf-8")
+            except UnicodeEncodeError:
+                pass
         return self._dummyContext.textSize(txt, align)
 
     def textsize(self, txt, align=None):
