@@ -38,8 +38,6 @@
 	<string>installDrawbot.py</string>
 	<key>name</key>
 	<string>DrawBot</string>
-	<key>repository</key>
-	<string>typemytype/drawBotRoboFontExtension</string>
 	<key>requiresVersionMajor</key>
 	<string>1</string>
 	<key>requiresVersionMinor</key>
@@ -48,5 +46,12 @@
 	<real>1417707288.332471</real>
 	<key>version</key>
 	<string>3.75</string>
+	<key>com.robofontmechanic.Mechanic</key>
+	<dict>
+		<key>repository</key>
+		<string>typemytype/drawBotRoboFontExtension</string>
+		<key>summary</key>
+		<string>DrawBot is a powerfull 2D graphics scripting tool.</string>
+	</dict>
 </dict>
 </plist>
