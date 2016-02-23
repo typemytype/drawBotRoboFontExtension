@@ -13,7 +13,7 @@ from context.dummyContext import DummyContext
 from context.tools import openType
 from context.tools.imageObject import ImageObject
 
-from misc import DrawBotError, warnings, VariableController, optimizePath
+from misc import DrawBotError, warnings, VariableController, optimizePath, isPDF, isEPS
 
 
 def _getmodulecontents(module, names=None):
@@ -1029,7 +1029,7 @@ class DrawBotDrawingTool(object):
             path = path._nsImage()
         if isinstance(path, AppKit.NSImage):
             rep = path.TIFFRepresentation()
-            isPDF = False
+            _isPDF = False
         else:
             if isinstance(path, (str, unicode)):
                 path = optimizePath(path)
@@ -1039,9 +1039,15 @@ class DrawBotDrawingTool(object):
                 if not os.path.exists(path):
                     raise DrawBotError("Image does not exist")
                 url = AppKit.NSURL.fileURLWithPath_(path)
-            isPDF = AppKit.PDFDocument.alloc().initWithURL_(url) is not None
-            rep = AppKit.NSImageRep.imageRepWithContentsOfURL_(url)
-        if isPDF:
+            _isPDF, _ = isPDF(url)
+            # check if the file is an .eps
+            _isEPS, epsRep = isEPS(url)
+            if _isEPS:
+                _isPDF = True
+                rep = epsRep
+            else:
+                rep = AppKit.NSImageRep.imageRepWithContentsOfURL_(url)
+        if _isPDF:
             w, h = rep.size()
         else:
             w, h = rep.pixelsWide(), rep.pixelsHigh()
@@ -1053,6 +1059,8 @@ class DrawBotDrawingTool(object):
 
         .. showcode:: /../examples/pixelColor.py
         """
+        if isinstance(path, (str, unicode)):
+            path = optimizePath(path)
         bitmap = _chachedPixelColorBitmaps.get(path)
         if bitmap is None:
             if isinstance(path, self._imageClass):
@@ -1060,8 +1068,6 @@ class DrawBotDrawingTool(object):
             elif isinstance(path, AppKit.NSImage):
                 source = path
             else:
-                if isinstance(path, (str, unicode)):
-                    path = optimizePath(path)
                 if path.startswith("http"):
                     url = AppKit.NSURL.URLWithString_(path)
                 else:

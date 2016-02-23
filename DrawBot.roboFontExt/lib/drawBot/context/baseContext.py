@@ -78,6 +78,24 @@ class BezierPath(object):
 
     curveto = curveTo
 
+    # def _qCurveToOne(self, pt1, pt2):
+    #     """This method implements the basic quadratic curve type. The
+    #     default implementation delegates the work to the cubic curve
+    #     function. Optionally override with a native implementation.
+    #     """
+    #     pt0x, pt0y = self._path.currentPoint()
+    #     pt1x, pt1y = pt1
+    #     pt2x, pt2y = pt2
+    #     mid1x = pt0x + 0.66666666666666667 * (pt1x - pt0x)
+    #     mid1y = pt0y + 0.66666666666666667 * (pt1y - pt0y)
+    #     mid2x = pt2x + 0.66666666666666667 * (pt1x - pt2x)
+    #     mid2y = pt2y + 0.66666666666666667 * (pt1y - pt2y)
+    #     self.curveTo((mid1x, mid1y), (mid2x, mid2y), pt2)
+
+    # def qCurveTo(self, *points):
+    #     n = len(points) - 1
+
+
     def arc(self, center, radius, startAngle, endAngle, clockwise):
         """
         Arc with `center` and a given `radius`, from `startAngle` to `endAngle`, going clockwise if `clockwise` is True and counter clockwise if `clockwise` is False.

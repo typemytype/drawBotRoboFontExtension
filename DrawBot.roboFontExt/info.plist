@@ -24,6 +24,13 @@
 			<string></string>
 		</dict>
 	</array>
+	<key>com.robofontmechanic.Mechanic</key>
+	<dict>
+		<key>repository</key>
+		<string>typemytype/drawBotRoboFontExtension</string>
+		<key>summary</key>
+		<string>DrawBot is a powerfull 2D graphics scripting tool.</string>
+	</dict>
 	<key>developer</key>
 	<string>DrawBot</string>
 	<key>developerURL</key>
@@ -46,12 +53,5 @@
 	<real>1417707288.332471</real>
 	<key>version</key>
 	<string>3.75</string>
-	<key>com.robofontmechanic.Mechanic</key>
-	<dict>
-		<key>repository</key>
-		<string>typemytype/drawBotRoboFontExtension</string>
-		<key>summary</key>
-		<string>DrawBot is a powerfull 2D graphics scripting tool.</string>
-	</dict>
 </dict>
 </plist>
