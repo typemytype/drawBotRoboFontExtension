@@ -12,8 +12,9 @@ from context.dummyContext import DummyContext
 
 from context.tools import openType
 from context.tools.imageObject import ImageObject
+from context.tools import gifTools
 
-from misc import DrawBotError, warnings, VariableController, optimizePath, isPDF, isEPS
+from misc import DrawBotError, warnings, VariableController, optimizePath, isPDF, isEPS, isGIF
 
 
 def _getmodulecontents(module, names=None):
@@ -143,6 +144,7 @@ class DrawBotDrawingTool(object):
         This is advised when using drawBot as a standalone module.
         """
         self._uninstallAllFonts()
+        gifTools.clearExplodedGifCache()
 
     # magic variables
 
@@ -1074,7 +1076,7 @@ class DrawBotDrawingTool(object):
         self._requiresNewFirstPage = True
         self._addInstruction("image", path, (x, y), alpha, pageNumber)
 
-    def imageSize(self, path):
+    def imageSize(self, path, pageNumber=None):
         """
         Return the `width` and `height` of an image.
 
@@ -1094,15 +1096,25 @@ class DrawBotDrawingTool(object):
                 if not os.path.exists(path):
                     raise DrawBotError("Image does not exist")
                 url = AppKit.NSURL.fileURLWithPath_(path)
-            _isPDF, _ = isPDF(url)
+            _isPDF, pdfDocument = isPDF(url)
             # check if the file is an .eps
             _isEPS, epsRep = isEPS(url)
+            # check if the file is an .gif
+            _isGIF, gifRep = isGIF(url)
             if _isEPS:
                 _isPDF = True
                 rep = epsRep
+            elif _isGIF and pageNumber is not None:
+                rep = gifTools.gifFrameAtIndex(url, pageNumber-1)
+            elif _isPDF and pageNumber is not None:
+                page = pdfDocument.pageAtIndex_(pageNumber-1)
+                # this is probably not the fastest method...
+                rep = AppKit.NSImage.alloc().initWithData_(page.dataRepresentation())
             else:
                 rep = AppKit.NSImageRep.imageRepWithContentsOfURL_(url)
         if _isPDF:
+            w, h = rep.size()
+        elif _isGIF:
             w, h = rep.size()
         else:
             w, h = rep.pixelsWide(), rep.pixelsHigh()
@@ -1138,6 +1150,22 @@ class DrawBotDrawingTool(object):
         color = color.colorUsingColorSpaceName_("NSCalibratedRGBColorSpace")
         return color.redComponent(), color.greenComponent(), color.blueComponent(), color.alphaComponent()
 
+    def numberOfPages(self, path):
+        path = optimizePath(path)
+        if path.startswith("http"):
+            url = AppKit.NSURL.URLWithString_(path)
+        else:
+            url = AppKit.NSURL.fileURLWithPath_(path)
+        pdf = Quartz.CGPDFDocumentCreateWithURL(url)
+        if pdf:
+            return Quartz.CGPDFDocumentGetNumberOfPages(pdf)
+        _isGIF, _ = isGIF(url)
+        if _isGIF:
+            frameCount = gifTools.gifFrameCount(url)
+            if frameCount:
+                return frameCount
+        return None
+
     # mov
 
     def frameDuration(self, seconds):
@@ -1152,6 +1180,28 @@ class DrawBotDrawingTool(object):
     def frameduration(self, seconds):
         _deprecatedWarningLowercase("frameDuration(%s)" % seconds)
         self.frameDuration(seconds)
+        
+        
+    # pdf links
+    
+    def linkDestination(self, name, x=None, y=None):
+        """
+        Add a destination point for a link within a PDF.
+        """
+        if x:
+            if len(x) == 2:
+                x, y = x
+            else: x, y = (None, None)
+        self._requiresNewFirstPage = True
+        self._addInstruction("linkDestination", name, (x, y))
+    
+    def linkRect(self, name, (x, y, w, h)):
+        """
+        Add a rect for a link within a PDF.
+        """
+        self._requiresNewFirstPage = True
+        self._addInstruction("linkRect", name, (x, y, w, h))
+        
 
     # helpers
 
