@@ -6,7 +6,7 @@ from fontTools.pens.cocoaPen import CocoaPen
 from drawBot.drawBotDrawingTools import _drawBotDrawingTool
 from drawBot.context.baseContext import BezierPath
 from drawBot.context import subscribeContext
-from drawBot.context.gifContext import gifsiclePath
+from drawBot.context.tools.gifTools import gifsiclePath
 
 from mojo.events import addObserver
 from mojo.extensions import getExtensionDefault
