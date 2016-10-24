@@ -932,6 +932,7 @@ class DrawBotDrawingTool(object):
         .. showcode:: /../examples/hyphenation.py
         """
         self._dummyContext.hyphenation(value)
+        self._checkLanguageHyphenation()
         self._addInstruction("hyphenation", value)
 
     def tabs(self, *tabs):
@@ -948,6 +949,32 @@ class DrawBotDrawingTool(object):
             return
         self._dummyContext.tabs(*tabs)
         self._addInstruction("tabs", *tabs)
+
+    def language(self, language):
+        """
+        Set the preferred language as language tag or None to use the default language.
+
+        Support is depending on local OS.
+
+        .. showcode:: /../examples/language.py
+        """
+        self._dummyContext.language(language)
+        self._checkLanguageHyphenation()
+        self._addInstruction("language", language)
+
+    def listLanguages(self):
+        """
+        List all available languages as dictionary mapped to a readable language/dialect name.
+        """
+        loc = AppKit.NSLocale.currentLocale()
+        return {tag: loc.displayNameForKey_value_(AppKit.NSLocaleIdentifier, tag) for tag in AppKit.NSLocale.availableLocaleIdentifiers()}
+
+    def _checkLanguageHyphenation(self):
+        language = self._dummyContext._state.text._language
+        if language and self._dummyContext._state.hyphenation:
+            locale = CoreText.CFLocaleCreate(None, language)
+            if not CoreText.CFStringIsHyphenationAvailableForLocale(locale):
+                warnings.warn("Language '%s' has no hyphenation available." % language)
 
     def openTypeFeatures(self, *args, **features):
         """
@@ -1006,6 +1033,26 @@ class DrawBotDrawingTool(object):
             y -= origins[-1][1]
         self.textBox(txt, (x, y-h, w*2, h*2))
 
+    def textOverflow(self, txt, (x, y, w, h), align=None):
+        """
+        Returns the overlowed text without drawing the text.
+
+        Optionally an alignment can be set.
+        Possible `align` values are: `"left"`, `"center"`, `"right"` and `"justified"`.
+
+        The default alignment is `left`.
+        """
+        if isinstance(txt, (str, unicode)):
+            try:
+                txt = txt.decode("utf-8")
+            except UnicodeEncodeError:
+                pass
+        if align is None:
+            align = "left"
+        elif align not in self._dummyContext._textAlignMap.keys():
+            raise DrawBotError("align must be %s" % (", ".join(self._dummyContext._textAlignMap.keys())))
+        return self._dummyContext.clippedText(txt, (x, y, w, h), align)
+
     def textBox(self, txt, (x, y, w, h), align=None):
         """
         Draw a text in a provided rectangle.
@@ -1032,8 +1079,8 @@ class DrawBotDrawingTool(object):
         return self._dummyContext.clippedText(txt, (x, y, w, h), align)
 
     def textbox(self, txt, x, y, w, h, align=None):
-        _deprecatedWarningLowercase("textbox(%s, (%s, %s, %s, %s), align=%s)" % (txt, x, y, y, w, align))
-        self.textbox(txt, (x, y, w, h), align)
+        _deprecatedWarningLowercase("textBox(%s, (%s, %s, %s, %s), align=%s)" % (txt, x, y, y, w, align))
+        return self.textBox(txt, (x, y, w, h), align)
 
     _formattedStringClass = FormattedString
 
@@ -1288,40 +1335,38 @@ class DrawBotDrawingTool(object):
         """
         Returns the current font ascender, based on the current `font` and `fontSize`.
         """
-        return self._dummyContext._state.text.font.ascender()
+        return self._dummyContext._state.text.fontAscender()
 
     def fontDescender(self):
         """
         Returns the current font descender, based on the current `font` and `fontSize`.
         """
-        return self._dummyContext._state.text.font.descender()
+        return self._dummyContext._state.text.fontDescender()
 
     def fontXHeight(self):
         """
         Returns the current font x-height, based on the current `font` and `fontSize`.
         """
-        return self._dummyContext._state.text.font.xHeight()
+        return self._dummyContext._state.text.fontXHeight()
 
     def fontCapHeight(self):
         """
         Returns the current font cap height, based on the current `font` and `fontSize`.
         """
-        return self._dummyContext._state.text.font.capHeight()
+        return self._dummyContext._state.text.fontCapHeight()
 
     def fontLeading(self):
         """
         Returns the current font leading, based on the current `font` and `fontSize`.
         """
-        return self._dummyContext._state.text.font.leading()
+        return self._dummyContext._state.text.fontLeading()
 
     def fontLineHeight(self):
         """
         Returns the current line height, based on the current `font` and `fontSize`.
         If a `lineHeight` is set, this value will be returned.
         """
-        if self._dummyContext._state.text._lineHeight is not None:
-            return self._dummyContext._state.text._lineHeight
-        return self._dummyContext._state.text.font.defaultLineHeightForFont()
+        return self._dummyContext._state.text.fontLineHeight()
 
     _bezierPathClass = BezierPath
 
