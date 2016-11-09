@@ -7,6 +7,7 @@ from drawBot.drawBotDrawingTools import _drawBotDrawingTool
 from drawBot.context.baseContext import BezierPath
 from drawBot.context import subscribeContext
 from drawBot.context.tools.gifTools import gifsiclePath
+from drawBot.context.tools.traceImage import potrace, mkbitmap
 
 from mojo.events import addObserver
 from mojo.extensions import getExtensionDefault
@@ -19,6 +20,9 @@ sys.path.append(os.path.dirname(__file__))
 
 # set the gifsicle tool as executable
 os.chmod(gifsiclePath, 0755)
+os.chmod(potrace, 0755)
+os.chmod(mkbitmap, 0755)
+
 
 # add a drawGlyph callback
 def drawGlyph(glyph):
