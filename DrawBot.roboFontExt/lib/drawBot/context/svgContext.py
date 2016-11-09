@@ -337,18 +337,23 @@ class SVGContext(BaseContext):
         self._svgContext.newline()
         self._state.clipPathID = uniqueID
 
-    def _textBox(self, txt, (x, y, w, h), align):
+    def _textBox(self, txt, box, align):
+        if isinstance(box, self._bezierPathClass):
+            path = box._getCGPath()
+            (x, y), (w, h) = CoreText.CGPathGetPathBoundingBox(path)
+        else:
+            x, y, w, h = box
+            path = CoreText.CGPathCreateMutable()
+            CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
+
         canDoGradients = True
         if align == "justified":
             warnings.warn("justified text is not supported in a svg context")
         attrString = self.attributedString(txt, align=align)
         if self._state.hyphenation:
-            attrString = self.hyphenateAttributedString(attrString, w)
+            attrString = self.hyphenateAttributedString(attrString, path)
         txt = attrString.string()
-
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
-        path = CoreText.CGPathCreateMutable()
-        CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
         box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
 
         self._svgBeginClipPath()
@@ -392,7 +397,7 @@ class SVGContext(BaseContext):
                 stroke = self._colorClass(strokeColor).svgColor()
                 if stroke:
                     spanData["stroke"] = stroke
-                    spanData["stroke-width"] = formatNumber(abs(strokeWidth * .5))
+                    spanData["stroke-width"] = formatNumber(abs(strokeWidth))
                 spanData["font-family"] = fontName
                 spanData["font-size"] = formatNumber(fontSize)
 
@@ -521,7 +526,7 @@ class SVGContext(BaseContext):
         stroke = self._svgStrokeColor()
         if stroke:
             data["stroke"] = stroke
-            data["stroke-width"] = formatNumber(abs(self._state.strokeWidth * .5))
+            data["stroke-width"] = formatNumber(abs(self._state.strokeWidth))
         if self._state.lineDash:
             data["stroke-dasharray"] = ",".join([str(i) for i in self._state.lineDash])
         if self._state.lineJoin in self._svgLineJoinStylesMap:

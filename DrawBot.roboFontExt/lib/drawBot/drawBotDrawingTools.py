@@ -91,7 +91,7 @@ class DrawBotDrawingTool(object):
     def _addInstruction(self, callback, *args, **kwargs):
         if self._requiresNewFirstPage and not self._hasPage:
             self._hasPage = True
-            self._instructionsStack.append(("newPage", [self.width(), self.height()], {}))
+            self._instructionsStack.insert(0, ("newPage", [self.width(), self.height()], {}))
         self._instructionsStack.append((callback, args, kwargs))
 
     def _drawInContext(self, context):
@@ -856,6 +856,9 @@ class DrawBotDrawingTool(object):
 
         The name of the font relates to the font's postscript name.
 
+        The font name is returned, which is handy when the font was loaded
+        from a path.
+
         ::
 
             font("Times-Italic")
@@ -864,6 +867,7 @@ class DrawBotDrawingTool(object):
         fontName = fontName.encode("ascii", "ignore")
         self._dummyContext.font(fontName, fontSize)
         self._addInstruction("font", fontName, fontSize)
+        return fontName
 
     def fallbackFont(self, fontName):
         """
@@ -873,12 +877,14 @@ class DrawBotDrawingTool(object):
 
             fallbackFont("Times")
         """
+        fontName = self._tryInstallFontFromFontName(fontName)
         fontName = fontName.encode("ascii", "ignore")
         dummyFont = AppKit.NSFont.fontWithName_size_(fontName, 10)
         if dummyFont is None:
             raise DrawBotError("Fallback font '%s' is not available" % fontName)
         self._dummyContext.fallbackFont(fontName)
         self._addInstruction("fallbackFont", fontName)
+        return fontName
 
     def fontSize(self, fontSize):
         """
@@ -1033,7 +1039,7 @@ class DrawBotDrawingTool(object):
             y -= origins[-1][1]
         self.textBox(txt, (x, y-h, w*2, h*2))
 
-    def textOverflow(self, txt, (x, y, w, h), align=None):
+    def textOverflow(self, txt, box, align=None):
         """
         Returns the overlowed text without drawing the text.
 
@@ -1051,9 +1057,9 @@ class DrawBotDrawingTool(object):
             align = "left"
         elif align not in self._dummyContext._textAlignMap.keys():
             raise DrawBotError("align must be %s" % (", ".join(self._dummyContext._textAlignMap.keys())))
-        return self._dummyContext.clippedText(txt, (x, y, w, h), align)
+        return self._dummyContext.clippedText(txt, box, align)
 
-    def textBox(self, txt, (x, y, w, h), align=None):
+    def textBox(self, txt, box, align=None):
         """
         Draw a text in a provided rectangle.
         Optionally an alignment can be set.
@@ -1075,11 +1081,11 @@ class DrawBotDrawingTool(object):
         elif align not in self._dummyContext._textAlignMap.keys():
             raise DrawBotError("align must be %s" % (", ".join(self._dummyContext._textAlignMap.keys())))
         self._requiresNewFirstPage = True
-        self._addInstruction("textBox", txt, (x, y, w, h), align)
-        return self._dummyContext.clippedText(txt, (x, y, w, h), align)
+        self._addInstruction("textBox", txt, box, align)
+        return self._dummyContext.clippedText(txt, box, align)
 
     def textbox(self, txt, x, y, w, h, align=None):
-        _deprecatedWarningLowercase("textBox(%s, (%s, %s, %s, %s), align=%s)" % (txt, x, y, y, w, align))
+        _deprecatedWarningLowercase("textBox('%s', (%s, %s, %s, %s), align=%s)" % (txt, x, y, y, w, align))
         return self.textBox(txt, (x, y, w, h), align)
 
     _formattedStringClass = FormattedString
@@ -1239,7 +1245,8 @@ class DrawBotDrawingTool(object):
         if x:
             if len(x) == 2:
                 x, y = x
-            else: x, y = (None, None)
+            else:
+                x, y = (None, None)
         self._requiresNewFirstPage = True
         self._addInstruction("linkDestination", name, (x, y))
 
@@ -1250,20 +1257,24 @@ class DrawBotDrawingTool(object):
         self._requiresNewFirstPage = True
         self._addInstruction("linkRect", name, (x, y, w, h))
 
-
     # helpers
 
-    def textSize(self, txt, align=None):
+    def textSize(self, txt, align=None, width=None, height=None):
         """
         Returns the size of a text with the current settings,
         like `font`, `fontSize` and `lineHeight` as a tuple (width, height).
+
+        Optionally a `width` constrain or `height` constrain can be provided
+        to calculate the lenght or width of text with the given constrain.
         """
         if isinstance(txt, (str, unicode)):
             try:
                 txt = txt.decode("utf-8")
             except UnicodeEncodeError:
                 pass
-        return self._dummyContext.textSize(txt, align)
+        if width is not None and height is not None:
+            raise DrawBotError("Calculating textSize can only have one constrain, either width or height must be None")
+        return self._dummyContext.textSize(txt, align, width, height)
 
     def textsize(self, txt, align=None):
         _deprecatedWarningLowercase("textSize(%s, %s)" % (txt, align))

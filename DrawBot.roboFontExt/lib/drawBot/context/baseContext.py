@@ -5,6 +5,11 @@ import Quartz
 import math
 
 from fontTools.pens.basePen import BasePen
+from fontTools.pens.areaPen import AreaPen
+
+from ufoLib.pointPen import PointToSegmentPen
+
+import booleanOperations
 
 from drawBot.misc import DrawBotError, cmyk2rgb, warnings
 
@@ -32,6 +37,41 @@ class BezierContour(list):
 
     def __repr__(self):
         return "<BezierContour>"
+
+    def _get_clockwise(self):
+        pen = AreaPen()
+        pen.endPath = pen.closePath
+        self.drawToPen(pen)
+        return pen.value < 0
+
+    clockwise = property(_get_clockwise, doc="A boolean representing if the contour has a clockwise direction.")
+
+    def drawToPointPen(self, pointPen):
+        pointPen.beginPath()
+        for i, segment in enumerate(self):
+            if len(segment) == 1:
+                segmentType = "line"
+                if i == 0 and self.open:
+                    segmentType = "move"
+                pointPen.addPoint(segment[0], segmentType=segmentType)
+            else:
+                pointPen.addPoint(segment[0])
+                pointPen.addPoint(segment[1])
+                pointPen.addPoint(segment[2], segmentType="curve")
+        pointPen.endPath()
+
+    def drawToPen(self, pen):
+        for i, segment in enumerate(self):
+            if i == 0:
+                pen.moveTo(*segment)
+            elif len(segment) == 1:
+                pen.lineTo(*segment)
+            else:
+                pen.curveTo(*segment)
+        if self.open:
+            pen.endPath()
+        else:
+            pen.closePath()
 
 
 class BezierPath(BasePen):
@@ -85,39 +125,47 @@ class BezierPath(BasePen):
         """
         self._path.closePath()
 
+    def beginPath(self):
+        """
+        Begin path.
+        """
+        self._pointToSegmentPen = PointToSegmentPen(self)
+        self._pointToSegmentPen.beginPath()
+
+    def addPoint(self, *args, **kwargs):
+        """
+        Add a point to the path.
+        """
+        self._pointToSegmentPen.addPoint(*args, **kwargs)
+
     def endPath(self):
-        pass
+        """
+        End the path.
+
+        When the bezier path is used as a pen, the path will be open.
+
+        When the bezier path is used as a point pen, the path will process all the points added with `addPoints`.
+        """
+        if hasattr(self, "_pointToSegmentPen"):
+            # its been uses in a point pen world
+            self._pointToSegmentPen.endPath()
+            del self._pointToSegmentPen
 
     def drawToPen(self, pen):
+        """
+        Draw the bezier path into a pen
+        """
         contours = self.contours
         for contour in contours:
-            for i, segment in enumerate(contour):
-                if i == 0:
-                    pen.moveTo(*segment)
-                elif len(segment) == 1:
-                    pen.lineTo(*segment)
-                else:
-                    pen.curveTo(*segment)
-            if contour.open:
-                pen.endPath()
-            else:
-                pen.closePath()
+            contour.drawToPen(pen)
 
     def drawToPointPen(self, pointPen):
+        """
+        Draw the bezier path into a point pen.
+        """
         contours = self.contours
         for contour in contours:
-            pointPen.beginPath()
-            for i, segment in enumerate(contour):
-                if len(segment) == 1:
-                    segmentType = "line"
-                    if i == 0 and contour.open:
-                        segmentType = "move"
-                    pointPen.addPoint(segment[0], segmentType=segmentType)
-                else:
-                    pointPen.addPoint(segment[0])
-                    pointPen.addPoint(segment[1])
-                    pointPen.addPoint(segment[2], segmentType="curve")
-            pointPen.endPath()
+            contour.drawToPointPen(pointPen)
 
     def arc(self, center, radius, startAngle, endAngle, clockwise):
         """
@@ -143,6 +191,7 @@ class BezierPath(BasePen):
         Add a oval at possition `x`, `y` with a size of `w`, `h`
         """
         self._path.appendBezierPathWithOvalInRect_(((x, y), (w, h)))
+        self.closePath()
 
     def text(self, txt, font=_FALLBACKFONT, fontSize=10, offset=None, box=None):
         """
@@ -195,12 +244,13 @@ class BezierPath(BasePen):
             for ctRun in ctRuns:
                 attributes = CoreText.CTRunGetAttributes(ctRun)
                 font = attributes.get(AppKit.NSFontAttributeName)
+                baselineShift = attributes.get(AppKit.NSBaselineOffsetAttributeName, 0)
                 glyphCount = CoreText.CTRunGetGlyphCount(ctRun)
                 for i in range(glyphCount):
                     glyph = CoreText.CTRunGetGlyphs(ctRun, (i, 1), None)[0]
                     ax, ay = CoreText.CTRunGetPositions(ctRun, (i, 1), None)[0]
                     if glyph:
-                        self._path.moveToPoint_((x+originX+ax, y+originY+ay))
+                        self._path.moveToPoint_((x+originX+ax, y+originY+ay+baselineShift))
                         self._path.appendBezierPathWithGlyph_inFont_(glyph, font)
         self.optimizePath()
 
@@ -209,6 +259,7 @@ class BezierPath(BasePen):
         Convert a given image to a vector outline.
 
         Optionally some tracing options can be provide:
+
         * `threshold`: the threshold used to bitmap an image
         * `blur`: the image can be blurred
         * `invert`: invert to the image
@@ -223,6 +274,33 @@ class BezierPath(BasePen):
         Return the nsBezierPath.
         """
         return self._path
+
+    def _getCGPath(self):
+        path = Quartz.CGPathCreateMutable()
+        count = self._path.elementCount()
+        for i in range(count):
+            instruction, points = self._path.elementAtIndex_associatedPoints_(i)
+            if instruction == AppKit.NSMoveToBezierPathElement:
+                Quartz.CGPathMoveToPoint(path, None, points[0].x, points[0].y)
+            elif instruction == AppKit.NSLineToBezierPathElement:
+                Quartz.CGPathAddLineToPoint(path, None, points[0].x, points[0].y)
+            elif instruction == AppKit.NSCurveToBezierPathElement:
+                Quartz.CGPathAddCurveToPoint(
+                    path, None,
+                    points[0].x, points[0].y,
+                    points[1].x, points[1].y,
+                    points[2].x, points[2].y
+                )
+            elif instruction == AppKit.NSClosePathBezierPathElement:
+                Quartz.CGPathCloseSubpath(path)
+        # hacking to get a proper close path at the end of the path
+        x, y, _, _ = self.bounds()
+        Quartz.CGPathMoveToPoint(path, None, x, y)
+        Quartz.CGPathAddLineToPoint(path, None, x, y)
+        Quartz.CGPathAddLineToPoint(path, None, x, y)
+        Quartz.CGPathAddLineToPoint(path, None, x, y)
+        Quartz.CGPathCloseSubpath(path)
+        return path
 
     def setNSBezierPath(self, path):
         """
@@ -339,6 +417,107 @@ class BezierPath(BasePen):
         aT.setTransformStruct_(transformMatrix[:])
         self._path.transformUsingAffineTransform_(aT)
 
+    # boolean operations
+
+    def _contoursForBooleanOperations(self):
+        # contours are very temporaly objects
+        # redirect drawToPointPen to drawPoints
+        contours = self.contours
+        for contour in contours:
+            contour.drawPoints = contour.drawToPointPen
+        return contours
+
+    def union(self, other):
+        """
+        Return the union between two bezier paths.
+        """
+        if isinstance(other, self.__class__):
+            self.appendPath(other)
+        contours = self._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.union(contours, result)
+        return result
+
+    def removeOverlap(self):
+        """
+        Remove all overlaps in a bezier path.
+        """
+        contours = self._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.union(contours, result)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def difference(self, other):
+        """
+        Return the difference between two bezier paths.
+        """
+        subjectContours = self._contoursForBooleanOperations()
+        clipContours = other._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.difference(subjectContours, clipContours, result)
+        return result
+
+    def intersection(self, other):
+        """
+        Return the intersection between two bezier paths.
+        """
+        subjectContours = self._contoursForBooleanOperations()
+        clipContours = other._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.intersection(subjectContours, clipContours, result)
+        return result
+
+    def xor(self, other):
+        """
+        Return the xor between two bezier paths.
+        """
+        subjectContours = self._contoursForBooleanOperations()
+        clipContours = other._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.xor(subjectContours, clipContours, result)
+        return result
+
+    def __mod__(self, other):
+        return self.difference(other)
+
+    __rmod__ = __mod__
+
+    def __imod__(self, other):
+        result = self.difference(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def __or__(self, other):
+        return self.union(other)
+
+    __ror__ = __or__
+
+    def __ior__(self, other):
+        result = self.union(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def __and__(self, other):
+        return self.intersection(other)
+
+    __rand__ = __and__
+
+    def __iand__(self, other):
+        result = self.intersection(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def __xor__(self, other):
+        return self.xor(other)
+
+    __rxor__ = __xor__
+
+    def __ixor__(self, other):
+        result = self.xor(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
     def _points(self, onCurve=True, offCurve=True):
         points = []
         if not onCurve and not offCurve:
@@ -385,6 +564,18 @@ class BezierPath(BasePen):
 
     def __len__(self):
         return len(self.contours)
+
+    def __getitem__(self, index):
+        return self.contours[index]
+
+    def __iter__(self):
+        contours = self.contours
+        count = len(contours)
+        index = 0
+        while index < count:
+            contour = contours[index]
+            yield contour
+            index += 1
 
 
 class Color(object):
@@ -615,7 +806,6 @@ class FormattedString(object):
 
         Text can also be added with `formattedString += "hello"`. It will append the text with the current settings of the formatted string.
         """
-
         if isinstance(txt, (str, unicode)):
             try:
                 txt = txt.decode("utf-8")
@@ -626,6 +816,16 @@ class FormattedString(object):
             if value is not None:
                 setattr(self, "_%s" % key, value)
 
+        if self._fill is not None:
+            try:
+                len(self._fill)
+            except:
+                self._fill = (self._fill,)
+        if self._stroke is not None:
+            try:
+                len(self._stroke)
+            except:
+                self._stroke = (self._stroke,)
         if self._fill:
             self._cmykFill = None
         elif self._cmykFill:
@@ -701,27 +901,27 @@ class FormattedString(object):
                     tabAlign = self._textAlignMap["right"]
                 tabStop = AppKit.NSTextTab.alloc().initWithTextAlignment_location_options_(tabAlign, tab, tabOptions)
                 para.addTabStop_(tabStop)
-        if self._lineHeight:
+        if self._lineHeight is not None:
             # para.setLineSpacing_(lineHeight)
             para.setMaximumLineHeight_(self._lineHeight)
             para.setMinimumLineHeight_(self._lineHeight)
 
-        if self._indent:
+        if self._indent is not None:
             para.setHeadIndent_(self._indent)
             para.setFirstLineHeadIndent_(self._indent)
-        if self._tailIndent:
+        if self._tailIndent is not None:
             para.setTailIndent_(self._tailIndent)
-        if self._firstLineIndent:
+        if self._firstLineIndent is not None:
             para.setFirstLineHeadIndent_(self._firstLineIndent)
 
-        if self._paragraphTopSpacing:
+        if self._paragraphTopSpacing is not None:
             para.setParagraphSpacingBefore_(self._paragraphTopSpacing)
-        if self._paragraphBottomSpacing:
+        if self._paragraphBottomSpacing is not None:
             para.setParagraphSpacing_(self._paragraphBottomSpacing)
 
-        if self._tracking:
+        if self._tracking is not None:
             attributes[AppKit.NSKernAttributeName] = self._tracking
-        if self._baselineShift:
+        if self._baselineShift is not None:
             attributes[AppKit.NSBaselineOffsetAttributeName] = self._baselineShift
         if self._language:
             attributes["NSLanguage"] = self._language
@@ -739,32 +939,43 @@ class FormattedString(object):
         if isinstance(index, slice):
             start = index.start
             stop = index.stop
-            textLenght = len(self)
+            textLength = len(self)
 
             if start is None:
                 start = 0
             elif start < 0:
-                start = textLenght + start
-            elif start > textLenght:
-                start = textLenght
+                start = textLength + start
+            elif start > textLength:
+                start = textLength
 
             if stop is None:
-                stop = textLenght
+                stop = textLength
             elif stop < 0:
-                stop = textLenght + stop
+                stop = textLength + stop
 
-            if start + (stop-start) > textLenght:
-                stop = textLenght - stop
+            if start + (stop-start) > textLength:
+                stop = textLength
 
-            rng = (start, stop-start)
-            new = self.__class__()
+            location = start
+            length = stop-start
+
+            if location < 0:
+                location = 0
+            if length > textLength:
+                length = textLength
+            elif length < 0:
+                length = 0
+
+            rng = location, length
+            attributes = {key: getattr(self, "_%s" % key) for key in self._formattedAttributes}
+            new = self.__class__(**attributes)
             try:
                 new._attributedString = self._attributedString.attributedSubstringFromRange_(rng)
             except:
                 pass
             return new
         else:
-            text = str(self)
+            text = self._attributedString.string()
             return text[index]
 
     def __len__(self):
@@ -782,12 +993,16 @@ class FormattedString(object):
         The default `fontSize` is 10pt.
 
         The name of the font relates to the font's postscript name.
+
+        The font name is returned, which is handy when the font was loaded
+        from a path.
         """
         font = _tryInstallFontFromFontName(font)
         font = font.encode("ascii", "ignore")
         self._font = font
         if fontSize is not None:
             self._fontSize = fontSize
+        return font
 
     def fallbackFont(self, font):
         """
@@ -801,6 +1016,7 @@ class FormattedString(object):
             if testFont is None:
                 raise DrawBotError("Fallback font '%s' is not available" % font)
         self._fallbackFont = font
+        return font
 
     def fontSize(self, fontSize):
         """
@@ -1255,7 +1471,7 @@ class BaseContext(object):
     def _transform(self, matrix):
         pass
 
-    def _textBox(self, txt, (x, y, w, h), align):
+    def _textBox(self, txt, box, align):
         pass
 
     def _image(self, path, (x, y), alpha, pageNumber):
@@ -1495,7 +1711,7 @@ class BaseContext(object):
         self._transform(matrix)
 
     def font(self, fontName, fontSize):
-        self._state.text.font(fontName, fontSize)
+        return self._state.text.font(fontName, fontSize)
 
     def fallbackFont(self, fontName):
         self._state.text.fallbackFont(fontName)
@@ -1531,7 +1747,8 @@ class BaseContext(object):
         self._state.text.append(txt, align=align)
         return self._state.text.getNSObject()
 
-    def hyphenateAttributedString(self, attrString, width):
+    def hyphenateAttributedString(self, attrString, path):
+        # add soft hyphens
         attrString = attrString.mutableCopy()
         mutString = attrString.mutableString()
         wordRange = AppKit.NSMakeRange(mutString.length(), 0)
@@ -1543,57 +1760,87 @@ class BaseContext(object):
                 if hyphenIndex != AppKit.NSNotFound:
                     mutString.insertString_atIndex_(unichr(self._softHypen), hyphenIndex)
 
-        textLength = attrString.length()
+        # get the lines
+        lines = self._getTypesetterLinesWithPath(attrString, path)
+        # get all lines justified
+        justifiedLines = self._getTypesetterLinesWithPath(self._justifyAttributedString(attrString), path)
 
-        setter = CoreText.CTTypesetterCreateWithAttributedString(attrString)
-        location = 0
-        firstLine = True
-        while location < textLength:
-            para, _ = attrString.attribute_atIndex_effectiveRange_(AppKit.NSParagraphStyleAttributeName, location, None)
-            lineWidth = width
-            if para:
-                lineWidth = para.tailIndent()
-                if lineWidth <= 0:
-                    lineWidth = width + lineWidth
-
-                if firstLine:
-                    lineWidth -= para.firstLineHeadIndent()
-                else:
-                    lineWidth -= para.headIndent()
-
-            breakIndex = CoreText.CTTypesetterSuggestLineBreak(setter, location, lineWidth)
-            sub = attrString.attributedSubstringFromRange_((location, breakIndex))
-            location += breakIndex
-            subString = sub.string()
-            if breakIndex == 0:
-                break
-            subString = sub.string()
-            if subString[-1] == unichr(self._softHypen):
-                hyphenAttr, _ = sub.attributesAtIndex_effectiveRange_(0, None)
+        # loop over all lines
+        i = 0
+        while i < len(lines):
+            # get the current line
+            line = lines[i]
+            # get the range in the text for the current line
+            rng = CoreText.CTLineGetStringRange(line)
+            # get the substring from the range
+            subString = attrString.attributedSubstringFromRange_(rng)
+            # get the string
+            subStringText = subString.string()
+            # check if the line ends with a softhypen
+            if len(subStringText) and subStringText[-1] == unichr(self._softHypen):
+                # here we go
+                # get the justified line and get the max line width
+                maxLineWidth, a, d, l = CoreText.CTLineGetTypographicBounds(justifiedLines[i], None, None, None)
+                # get the last attributes
+                hyphenAttr, _ = subString.attributesAtIndex_effectiveRange_(0, None)
+                # create a hyphen string
                 hyphenAttrString = AppKit.NSAttributedString.alloc().initWithString_attributes_("-", hyphenAttr)
+                # get the width of the hyphen
                 hyphenWidth = hyphenAttrString.size().width
-                if sub.size().width + hyphenWidth < lineWidth:
-                    mutString.insertString_atIndex_("-", location)
-                    setter = CoreText.CTTypesetterCreateWithAttributedString(attrString)
-                    location += 1
-                else:
-                    attrString.deleteCharactersInRange_((location-1, 1))
-                    setter = CoreText.CTTypesetterCreateWithAttributedString(attrString)
-                    location -= breakIndex
-                    textLength = attrString.length()
-            firstLine = False
+                # get all line break location of that line
+                lineBreakLocation = len(subString)
+                possibleLineBreaks = [lineBreakLocation]
+                while lineBreakLocation:
+                    lineBreakLocation = subString.lineBreakBeforeIndex_withinRange_(lineBreakLocation, (0, len(subString)))
+                    if lineBreakLocation:
+                        possibleLineBreaks.append(lineBreakLocation)
+                breakFound = False
+                # loop over all possible line breaks
+                while possibleLineBreaks:
+                    lineBreak = possibleLineBreaks.pop(0)
+                    # get a possible line
+                    breakString = subString.attributedSubstringFromRange_((0, lineBreak))
+                    # get the width
+                    stringWidth = breakString.size().width
+                    # add hyphen width if required
+                    if breakString.string()[-1] == unichr(self._softHypen):
+                        stringWidth += hyphenWidth
+                    # found a break
+                    if stringWidth <= maxLineWidth:
+                        breakFound = True
+                        break
 
+                if breakFound and len(breakString.string()) > 2 and breakString.string()[-1] == unichr(self._softHypen):
+                    # if the break line ends with a soft hyphen
+                    # add a hyphen
+                    attrString.replaceCharactersInRange_withString_((rng.location + lineBreak, 0), "-")
+                # remove all soft hyphens for the range of that line
+                mutString.replaceOccurrencesOfString_withString_options_range_(unichr(self._softHypen), "", AppKit.NSLiteralSearch, rng)
+                # reset the lines, from the adjusted attribute string
+                lines = self._getTypesetterLinesWithPath(attrString, path)
+                # reset the justifed lines form the adjusted attributed string
+                justifiedLines = self._getTypesetterLinesWithPath(self._justifyAttributedString(attrString), path)
+            # next line
+            i += 1
+        # remove all soft hyphen
         mutString.replaceOccurrencesOfString_withString_options_range_(unichr(self._softHypen), "", AppKit.NSLiteralSearch, (0, mutString.length()))
+        # done!
         return attrString
 
-    def clippedText(self, txt, (x, y, w, h), align):
+    def clippedText(self, txt, box, align):
+        if isinstance(box, self._bezierPathClass):
+            path = box._getCGPath()
+            (x, y), (w, h) = CoreText.CGPathGetPathBoundingBox(path)
+        else:
+            x, y, w, h = box
+            path = CoreText.CGPathCreateMutable()
+            CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
+
         attrString = self.attributedString(txt, align=align)
         if self._state.hyphenation:
             hyphenIndexes = [i for i, c in enumerate(attrString.string()) if c == "-"]
-            attrString = self.hyphenateAttributedString(attrString, w)
+            attrString = self.hyphenateAttributedString(attrString, path)
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
-        path = CoreText.CGPathCreateMutable()
-        CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
         box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
         visibleRange = CoreText.CTFrameGetVisibleStringRange(box)
         clip = visibleRange.length
@@ -1607,14 +1854,46 @@ class BaseContext(object):
             clip -= subString.count("-")
         return txt[clip:]
 
-    def textSize(self, txt, align):
-        text = self.attributedString(txt, align)
-        w, h = text.size()
+    def _justifyAttributedString(self, attr):
+        # create a justified copy of the attributed string
+        attr = attr.mutableCopy()
+
+        def changeParaAttribute(para, rng, _):
+            para = para.mutableCopy()
+            para.setAlignment_(AppKit.NSJustifiedTextAlignment)
+            attr.addAttribute_value_range_(AppKit.NSParagraphStyleAttributeName, para, rng)
+
+        attr.enumerateAttribute_inRange_options_usingBlock_(AppKit.NSParagraphStyleAttributeName, (0, len(attr)), 0, changeParaAttribute)
+        return attr
+
+    def _getTypesetterLinesWithPath(self, attrString, path, offset=None):
+        # get lines for an attribute string with a given path
+        if offset is None:
+            offset = 0, 0
+        setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
+        frame = CoreText.CTFramesetterCreateFrame(setter, offset, path, None)
+        return CoreText.CTFrameGetLines(frame)
+
+    def textSize(self, txt, align, width, height):
+        attrString = self.attributedString(txt, align)
+        if width is None:
+            w, h = attrString.size()
+        else:
+            if width is None:
+                width = CoreText.CGFLOAT_MAX
+            if height is None:
+                height = CoreText.CGFLOAT_MAX
+            if self._state.hyphenation:
+                path = CoreText.CGPathCreateMutable()
+                CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(0, 0, width, height))
+                attrString = self.hyphenateAttributedString(attrString, path)
+            setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
+            (w, h), _ = CoreText.CTFramesetterSuggestFrameSizeWithConstraints(setter, (0, 0), None, (width, height), None)
         return w, h
 
-    def textBox(self, txt, (x, y, w, h), align="left"):
+    def textBox(self, txt, box, align="left"):
         self._state.path = None
-        self._textBox(txt, (x, y, w, h), align)
+        self._textBox(txt, box, align)
 
     def image(self, path, (x, y), alpha, pageNumber):
         self._image(path, (x, y), alpha, pageNumber)
