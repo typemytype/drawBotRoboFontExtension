@@ -5,16 +5,10 @@ import Quartz
 import math
 
 from fontTools.pens.basePen import BasePen
-from fontTools.pens.areaPen import AreaPen
-
-from ufoLib.pointPen import PointToSegmentPen
-
-import booleanOperations
 
 from drawBot.misc import DrawBotError, cmyk2rgb, warnings
 
 from tools import openType
-from tools import traceImage
 
 
 _FALLBACKFONT = "LucidaGrande"
@@ -39,6 +33,7 @@ class BezierContour(list):
         return "<BezierContour>"
 
     def _get_clockwise(self):
+        from fontTools.pens.areaPen import AreaPen
         pen = AreaPen()
         pen.endPath = pen.closePath
         self.drawToPen(pen)
@@ -72,6 +67,11 @@ class BezierContour(list):
             pen.endPath()
         else:
             pen.closePath()
+
+    def _get_points(self):
+        return [point for segment in self for point in segment]
+
+    points = property(_get_points, doc="Return a list of all the points making up this contour, regardless of whether they are on curve or off curve.")
 
 
 class BezierPath(BasePen):
@@ -129,6 +129,7 @@ class BezierPath(BasePen):
         """
         Begin path.
         """
+        from ufoLib.pointPen import PointToSegmentPen
         self._pointToSegmentPen = PointToSegmentPen(self)
         self._pointToSegmentPen.beginPath()
 
@@ -267,6 +268,7 @@ class BezierPath(BasePen):
         * `tolerance`: the precision tolerance of the vector outline
         * `offset`: add the traced vector outline with an offset to the BezierPath
         """
+        from tools import traceImage
         traceImage.TraceImage(path, self, threshold, blur, invert, turd, tolerance, offset)
 
     def getNSBezierPath(self):
@@ -372,6 +374,10 @@ class BezierPath(BasePen):
         new.appendPath(otherPath)
         return new
 
+    def __iadd__(self, other):
+        self.appendPath(other)
+        return self
+
     # transformations
 
     def translate(self, x=0, y=0):
@@ -431,9 +437,8 @@ class BezierPath(BasePen):
         """
         Return the union between two bezier paths.
         """
-        if isinstance(other, self.__class__):
-            self.appendPath(other)
-        contours = self._contoursForBooleanOperations()
+        import booleanOperations
+        contours = self._contoursForBooleanOperations() + other._contoursForBooleanOperations()
         result = self.__class__()
         booleanOperations.union(contours, result)
         return result
@@ -442,6 +447,7 @@ class BezierPath(BasePen):
         """
         Remove all overlaps in a bezier path.
         """
+        import booleanOperations
         contours = self._contoursForBooleanOperations()
         result = self.__class__()
         booleanOperations.union(contours, result)
@@ -452,6 +458,7 @@ class BezierPath(BasePen):
         """
         Return the difference between two bezier paths.
         """
+        import booleanOperations
         subjectContours = self._contoursForBooleanOperations()
         clipContours = other._contoursForBooleanOperations()
         result = self.__class__()
@@ -462,6 +469,7 @@ class BezierPath(BasePen):
         """
         Return the intersection between two bezier paths.
         """
+        import booleanOperations
         subjectContours = self._contoursForBooleanOperations()
         clipContours = other._contoursForBooleanOperations()
         result = self.__class__()
@@ -472,6 +480,7 @@ class BezierPath(BasePen):
         """
         Return the xor between two bezier paths.
         """
+        import booleanOperations
         subjectContours = self._contoursForBooleanOperations()
         clipContours = other._contoursForBooleanOperations()
         result = self.__class__()
@@ -769,7 +778,12 @@ class FormattedString(object):
                 raise TypeError("got an unexpected keyword argument '%s'" % attribute)
         result = dict()
         if addDefaults:
-            result.update(self._formattedAttributes)
+            for key, value in self._formattedAttributes.items():
+                if isinstance(value, dict):
+                    value = dict(value)
+                elif isinstance(value, list):
+                    value = list(value)
+                result[key] = value
         result.update(attributes)
         return result
 
@@ -919,7 +933,7 @@ class FormattedString(object):
         if self._paragraphBottomSpacing is not None:
             para.setParagraphSpacing_(self._paragraphBottomSpacing)
 
-        if self._tracking is not None:
+        if self._tracking:
             attributes[AppKit.NSKernAttributeName] = self._tracking
         if self._baselineShift is not None:
             attributes[AppKit.NSBaselineOffsetAttributeName] = self._baselineShift
@@ -1828,14 +1842,7 @@ class BaseContext(object):
         return attrString
 
     def clippedText(self, txt, box, align):
-        if isinstance(box, self._bezierPathClass):
-            path = box._getCGPath()
-            (x, y), (w, h) = CoreText.CGPathGetPathBoundingBox(path)
-        else:
-            x, y, w, h = box
-            path = CoreText.CGPathCreateMutable()
-            CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
-
+        path, origin = self._getPathForFrameSetter(box)
         attrString = self.attributedString(txt, align=align)
         if self._state.hyphenation:
             hyphenIndexes = [i for i, c in enumerate(attrString.string()) if c == "-"]
@@ -1873,6 +1880,16 @@ class BaseContext(object):
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
         frame = CoreText.CTFramesetterCreateFrame(setter, offset, path, None)
         return CoreText.CTFrameGetLines(frame)
+
+    def _getPathForFrameSetter(self, box):
+        if isinstance(box, self._bezierPathClass):
+            path = box._getCGPath()
+            (x, y), (w, h) = CoreText.CGPathGetPathBoundingBox(path)
+        else:
+            x, y, w, h = box
+            path = CoreText.CGPathCreateMutable()
+            CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
+        return path, (x, y)
 
     def textSize(self, txt, align, width, height):
         attrString = self.attributedString(txt, align)
