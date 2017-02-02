@@ -202,8 +202,9 @@ class GlyphContext(BaseContext):
 
             if glyph.image:
                 image = glyph.image
-                destImage = destLayer.addImage(image.path)
+                destImage = destLayer.addImage(image.data)
                 destImage.transformation = image.transformation
+                destImage.brightness = image.brightness
 
     def _printImage(self, pdf=None):
         pass
