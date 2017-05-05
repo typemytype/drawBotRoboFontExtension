@@ -738,6 +738,18 @@ class FormattedString(object):
         right=AppKit.NSRightTextAlignment,
     )
 
+    _textUnderlineMap = dict(
+        single=AppKit.NSUnderlineStyleSingle,
+        # thick=AppKit.NSUnderlineStyleThick,
+        # double=AppKit.NSUnderlineStyleDouble,
+        # solid=AppKit.NSUnderlinePatternSolid,
+        # dotted=AppKit.NSUnderlinePatternDot,
+        # dashed=AppKit.NSUnderlinePatternDash,
+        # dotDashed=AppKit.NSUnderlinePatternDashDot,
+        # dotDotted=AppKit.NSUnderlinePatternDashDotDot,
+        # byWord=0x8000 # AppKit.NSUnderlineByWord,
+    )
+
     _formattedAttributes = dict(
         font=_FALLBACKFONT,
         fallbackFont=None,
@@ -753,6 +765,7 @@ class FormattedString(object):
         lineHeight=None,
         tracking=None,
         baselineShift=None,
+        underline=None,
         openTypeFeatures=dict(),
         tabs=None,
         indent=None,
@@ -864,7 +877,10 @@ class FormattedString(object):
                 warnings.warn("font: %s is not installed, back to the fallback font: %s" % (fontName, ff))
                 font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
             coreTextfeatures = []
-            for featureTag, value in self._openTypeFeatures.items():
+            # sort features by their on/off state
+            # set all disabled features first
+            orderedOpenTypeFeatures = sorted(self._openTypeFeatures.items(), key=lambda (k, v): v)
+            for featureTag, value in orderedOpenTypeFeatures:
                 if not value:
                     featureTag = "%s_off" % featureTag
                 if featureTag in openType.featureMap:
@@ -937,6 +953,8 @@ class FormattedString(object):
             attributes[AppKit.NSKernAttributeName] = self._tracking
         if self._baselineShift is not None:
             attributes[AppKit.NSBaselineOffsetAttributeName] = self._baselineShift
+        if self._underline in self._textUnderlineMap:
+            attributes[AppKit.NSUnderlineStyleAttributeName] = self._textUnderlineMap[self._underline]
         if self._language:
             attributes["NSLanguage"] = self._language
         attributes[AppKit.NSParagraphStyleAttributeName] = para
@@ -1112,11 +1130,33 @@ class FormattedString(object):
         """
         self._baselineShift = baselineShift
 
+    def underline(self, underline):
+        """
+        Set the underline value.
+        Underline must be `single` or `None`.
+        """
+        self._underline = underline
+
     def openTypeFeatures(self, *args, **features):
         """
         Enable OpenType features.
 
-        .. showcode:: /../examples/openTypeFeaturesFromattedString.py
+        .. downloadcode:: openTypeFeaturesFormattedString.py
+
+            # create an empty formatted string object
+            t = FormattedString()
+            # set a font
+            t.font("ACaslonPro-Regular")
+            # set a font size
+            t.fontSize(60)
+            # add some text
+            t += "0123456789 Hello"
+            # enable some open type features
+            t.openTypeFeatures(smcp=True, lnum=True)
+            # add some text
+            t += " 0123456789 Hello"
+            # draw the formatted string
+            text(t, (10, 100))
         """
         if args and args[0] is None:
             self._openTypeFeatures.clear()
@@ -1141,7 +1181,16 @@ class FormattedString(object):
         Aligment can be `"left"`, `"center"`, `"right"` or any other character.
         If a character is provided the alignment will be `right` and centered on the specified character.
 
-        .. showcode:: /../examples/tabsFromattedString.py
+        .. downloadcode:: tabsFormattedString.py
+
+            # create a new formatted string
+            t = FormattedString()
+            # set some tabs
+            t.tabs((85, "center"), (232, "right"), (300, "left"))
+            # add text with tabs
+            t += " hello w o r l d".replace(" ", "\\t")
+            # draw the string
+            text(t, (10, 10))
         """
         if tabs and tabs[0] is None:
             self._tabs = None
@@ -1152,7 +1201,71 @@ class FormattedString(object):
         """
         Set indent of text left of the paragraph.
 
-        .. showcode:: /../examples/indent.py
+        .. downloadcode:: indent.py
+
+            # setting up some variables
+            x, y, w, h = 10, 10, 200, 300
+
+            txtIndent = 50
+            txtFirstLineIndent = 70
+            txtTailIndent = -50
+
+            paragraphTop = 3
+            paragraphBottom = 10
+
+            txt = '''DrawBot is an ideal tool to teach the basics of programming. Students get colorful graphic treats while getting familiar with variables, conditional statements, functions and what have you. Results can be saved in a selection of different file formats, including as high resolution, scaleable PDF, svg, movie, png, jpeg, tiff...'''
+
+            # a new page with preset size
+            newPage(w+x*2, h+y*2)
+            # draw text indent line
+            stroke(1, 0, 0)
+            line((x+txtIndent, y), (x+txtIndent, y+h))
+            # draw text firstline indent line
+            stroke(1, 1, 0)
+            line((x+txtFirstLineIndent, y), (x+txtFirstLineIndent, y+h))
+            # draw tail indent
+            pos = txtTailIndent
+            # tail indent could be negative
+            if pos <= 0:
+                # substract from width of the text box
+                pos = w + pos
+            stroke(0, 0, 1)
+            line((x+pos, y), (x+pos, y+h))
+            # draw a rectangle
+            fill(0, .1)
+            stroke(None)
+            rect(x, y, w, h)
+
+            # create a formatted string
+            t = FormattedString()
+            # set alignment
+            t.align("justified")
+            # add text
+            t += txt
+            # add hard return
+            t += "\\n"
+            # set style for indented text
+            t.fontSize(6)
+            t.paragraphTopSpacing(paragraphTop)
+            t.paragraphBottomSpacing(paragraphBottom)
+            t.firstLineIndent(txtFirstLineIndent)
+            t.indent(txtIndent)
+            t.tailIndent(txtTailIndent)
+            # add text
+            t += txt
+            # add hard return
+            t += "\\n"
+            # reset style
+            t.fontSize(10)
+            t.indent(None)
+            t.tailIndent(None)
+            t.firstLineIndent(None)
+            t.paragraphTopSpacing(None)
+            t.paragraphBottomSpacing(None)
+            # add text
+            t += txt
+            # draw formatted string in a text box
+            textBox(t, (x, y, w, h))
         """
         self._indent = indent
 
@@ -1277,6 +1390,19 @@ class FormattedString(object):
         """
         Append a glyph by his glyph name using the current `font`.
         Multiple glyph names are possible.
+
+        .. downloadcode:: appendGlyphFormattedString.py
+
+            # create an empty formatted string object
+            t = FormattedString()
+            # set a font
+            t.font("Menlo-Regular")
+            # set a font size
+            t.fontSize(60)
+            # add some glyphs
+            t.appendGlyph("Eng", "Eng.alt")
+            # draw the formatted string
+            text(t, (10, 100))
         """
         # use a non breaking space as replacement character
         baseString = unichr(0x00A0)
@@ -1304,7 +1430,7 @@ class FormattedString(object):
             if glyph:
                 self.append(baseString)
                 glyphInfo = AppKit.NSGlyphInfo.glyphInfoWithGlyph_forFont_baseString_(glyph, font, baseString)
-                self._attributedString.addAttribute_value_range_(AppKit.NSGlyphInfoAttributeName, glyphInfo, (len(self)-1, 1))
+                self._attributedString.addAttribute_value_range_(AppKit.NSGlyphInfoAttributeName, glyphInfo, (len(self) - 1, 1))
             else:
                 warnings.warn("font %s has no glyph with the name %s" % (font.fontName(), glyphName))
         self.openTypeFeatures(**_openTypeFeatures)
@@ -1402,18 +1528,9 @@ class BaseContext(object):
         round=Quartz.kCGLineCapRound,
     )
 
-    _textAlignMap = dict(
-        center=AppKit.NSCenterTextAlignment,
-        left=AppKit.NSLeftTextAlignment,
-        right=AppKit.NSRightTextAlignment,
-        justified=AppKit.NSJustifiedTextAlignment,
-    )
-
-    _textTabAlignMap = dict(
-        center=AppKit.NSCenterTextAlignment,
-        left=AppKit.NSLeftTextAlignment,
-        right=AppKit.NSRightTextAlignment,
-    )
+    _textAlignMap = FormattedString._textAlignMap
+    _textTabAlignMap = FormattedString._textTabAlignMap
+    _textUnderlineMap = FormattedString._textUnderlineMap
 
     _colorSpaceMap = dict(
         genericRGB=AppKit.NSColorSpace.genericRGBColorSpace,
@@ -1741,6 +1858,9 @@ class BaseContext(object):
 
     def baselineShift(self, baselineShift):
         self._state.text.baselineShift(baselineShift)
+
+    def underline(self, underline):
+        self._state.text.underline(underline)
 
     def hyphenation(self, value):
         self._state.hyphenation = value

@@ -48,10 +48,10 @@
 	<key>requiresVersionMajor</key>
 	<string>1</string>
 	<key>requiresVersionMinor</key>
-	<string>5.2</string>
+	<string>8</string>
 	<key>timeStamp</key>
 	<real>1417707288.332471</real>
 	<key>version</key>
-	<string>3.89</string>
+	<string>3.95</string>
 </dict>
 </plist>

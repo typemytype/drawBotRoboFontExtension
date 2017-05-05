@@ -3,6 +3,7 @@ import traceback
 
 from AppKit import *
 
+
 class StdOutput(object):
 
     def __init__(self, output, isError=False):
@@ -23,6 +24,7 @@ class StdOutput(object):
     def close(self):
         pass
 
+
 class DrawBotNamespace(dict):
 
     def __init__(self, context, variables):
@@ -33,7 +35,8 @@ class DrawBotNamespace(dict):
         if item in self._variables:
             return getattr(self._context, item)
         return super(DrawBotNamespace, self).__getitem__(item)
-        
+
+
 def CallbackRunner(callback, stdout=None, stderr=None, args=[], kwargs={}, fallbackResult=None):
     result = fallbackResult
     saveStdout = sys.stdout
@@ -56,6 +59,7 @@ def CallbackRunner(callback, stdout=None, stderr=None, args=[], kwargs={}, fallb
 
     return result
 
+
 def createSavePDFImage():
     im = NSImage.imageNamed_("toolbarScriptNew")
     pdfText = NSString.stringWithString_("PDF")
@@ -64,18 +68,18 @@ def createSavePDFImage():
     shadow.setShadowOffset_((0, -1))
     shadow.setShadowColor_(NSColor.whiteColor())
     shadow.setShadowBlurRadius_(1)
-                        
+
     attributes = {
-                NSFontAttributeName : NSFont.boldSystemFontOfSize_(7),
-                NSForegroundColorAttributeName : NSColor.darkGrayColor(),
-                NSShadowAttributeName : shadow
-                }
-    
+        NSFontAttributeName: NSFont.boldSystemFontOfSize_(7),
+        NSForegroundColorAttributeName: NSColor.darkGrayColor(),
+        NSShadowAttributeName: shadow
+    }
+
     pdfSaveImage = NSImage.alloc().initWithSize_(im.size())
-    
+
     pdfSaveImage.lockFocus()
     im.drawAtPoint_fromRect_operation_fraction_((0, 0), NSZeroRect, NSCompositeSourceOver, 1)
     pdfText.drawAtPoint_withAttributes_((10, 10), attributes)
     pdfSaveImage.unlockFocus()
-    
+
     return pdfSaveImage
