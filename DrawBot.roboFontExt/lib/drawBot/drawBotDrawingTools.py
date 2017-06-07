@@ -1511,7 +1511,7 @@ class DrawBotDrawingTool(object):
         if fontName:
             fontName = self._tryInstallFontFromFontName(fontName)
         else:
-            fontName = self._dummyContext._state.text.fontName
+            fontName = self._dummyContext._state.text._font
         return openType.getFeatureTagsForFontName(fontName)
 
     # drawing text
@@ -1522,6 +1522,10 @@ class DrawBotDrawingTool(object):
 
         Optionally an alignment can be set.
         Possible `align` values are: `"left"`, `"center"` and `"right"`.
+
+        The default alignment is `left`.
+
+        Optionally `txt` can be a `FormattedString`.
 
         .. downloadcode:: text.py
 
@@ -1549,14 +1553,13 @@ class DrawBotDrawingTool(object):
             x -= w * .5
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
         path = Quartz.CGPathCreateMutable()
-        Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(x, y, w*2, h))
+        Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(x, y, w, h))
         box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
         ctLines = CoreText.CTFrameGetLines(box)
         origins = CoreText.CTFrameGetLineOrigins(box, (0, len(ctLines)), None)
         if origins:
-            x -= origins[-1][0]
-            y -= origins[-1][1]
-        self.textBox(txt, (x, y-h, w*2, h*2), align=align)
+            y -= origins[0][1]
+        self.textBox(txt, (x, y-h, w, h*2), align=align)
 
     def textOverflow(self, txt, box, align=None):
         """
@@ -1568,6 +1571,9 @@ class DrawBotDrawingTool(object):
         Possible `align` values are: `"left"`, `"center"`, `"right"` and `"justified"`.
 
         The default alignment is `left`.
+
+        Optionally `txt` can be a `FormattedString`.
+        Optionally `box` can be a `BezierPath`.
         """
         if isinstance(txt, (str, unicode)):
             try:
