@@ -26,11 +26,11 @@ class GlyphBezierPath(BezierPath):
         c = 0.60
         hx = w * c * .5
         hy = h * c * .5
-        self.moveTo((x+w*.5, y))
-        self.curveTo((x+w*.5 + hx, y), (x+w, y+h*.5 - hy), (x+w, y+h*.5))
-        self.curveTo((x+w, y+h*.5 + hy), (x+w*.5 + hx, y+h), (x+w*.5, y+h))
-        self.curveTo((x+w*.5 - hx, y+h), (x, y+h*.5 + hy), (x, y+h*.5))
-        self.curveTo((x, y+h*.5 - hy), (x+w*.5 - hx, y), (x+w*.5, y))
+        self.moveTo((x + w * .5, y))
+        self.curveTo((x + w * .5 + hx, y), (x + w, y + h * .5 - hy), (x + w, y + h * .5))
+        self.curveTo((x + w, y + h * .5 + hy), (x + w * .5 + hx, y + h), (x + w * .5, y + h))
+        self.curveTo((x + w * .5 - hx, y + h), (x, y + h * .5 + hy), (x, y + h * .5))
+        self.curveTo((x, y + h * .5 - hy), (x + w * .5 - hx, y), (x + w * .5, y))
         self.closePath()
 
 
@@ -98,50 +98,13 @@ class GlyphContext(BaseContext):
     def _transform(self, transform):
         self._state.transformMatrix = self._state.transformMatrix.transform(transform)
 
-    def _textBox(self, txt, (x, y, w, h), align):
-        attrString = self.attributedString(txt, align=align)
-        if self._state.text.hyphenation:
-            attrString = self.hyphenateAttributedString(attrString, w)
-        txt = attrString.string()
-
-        setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
-        path = CoreText.CGPathCreateMutable()
-        CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
-        box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
-
-        ctLines = CoreText.CTFrameGetLines(box)
-        origins = CoreText.CTFrameGetLineOrigins(box, (0, len(ctLines)), None)
-
-        path = self._bezierPathClass()
-
-        for i, (originX, originY) in enumerate(origins):
-            ctLine = ctLines[i]
-            ctRuns = CoreText.CTLineGetGlyphRuns(ctLine)
-            for ctRun in ctRuns:
-                attributes = CoreText.CTRunGetAttributes(ctRun)
-                font = attributes.get(AppKit.NSFontAttributeName)
-                fontName = font.fontName()
-                fontSize = font.pointSize()
-
-                r = CoreText.CTRunGetStringRange(ctRun)
-                runTxt = txt.substringWithRange_((r.location, r.length))
-
-                while runTxt and runTxt[-1] == " ":
-                    runTxt = runTxt[:-1]
-                runTxt = runTxt.replace("\n", "")
-                runTxt = runTxt.encode("utf-8")
-
-                runPos = CoreText.CTRunGetPositions(ctRun, (0, 1), None)
-                runX = runY = 0
-                if runPos:
-                    runX = runPos[0].x
-                    runY = runPos[0].y
-
-                offset = originX + runX + x, originY + runY + y
-
-                path.text(runTxt, font=fontName, fontSize=fontSize, offset=offset)
-
-        self.drawPath(path)
+    def _textBox(self, txt, box, align):
+        outLinePath = self._bezierPathClass()
+        outLinePath.textBox(txt, box, align=align,
+            font=self._state.text._font,
+            fontSize=self._state.text._fontSize,
+            hyphenation=self._state.hyphenation)
+        self.drawPath(outLinePath)
 
     def _image(self, path, (x, y), alpha):
         image = self._glyphs[-1].addImage(path, (x, y))
@@ -185,7 +148,7 @@ class GlyphContext(BaseContext):
         # can not found a proper glyph to draw in
         if dest is None:
             raise GlyphDrawBotError("No glyph available to draw in")
-
+        dest.clear()
         multiplePages = len(self._glyphs) > 1
 
         for count, glyph in enumerate(self._glyphs):
