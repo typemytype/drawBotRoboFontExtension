@@ -1,16 +1,19 @@
+from __future__ import absolute_import
+
 import AppKit
 import CoreText
 
 import os
-import base64
+# import base64
 import random
+import uuid
 
 from fontTools.misc.xmlWriter import XMLWriter
 
 from fontTools.misc.transform import Transform
 
-from tools.openType import getFeatureTagsForFontAttributes
-from baseContext import BaseContext, GraphicsState, Shadow, Color, FormattedString, Gradient
+from .tools.openType import getFeatureTagsForFontAttributes
+from .baseContext import BaseContext, GraphicsState, Shadow, Color, FormattedString, Gradient
 
 from drawBot.misc import warnings, formatNumber
 
@@ -67,7 +70,7 @@ class SVGGradient(Gradient):
 
     def __init__(self, *args, **kwargs):
         super(SVGGradient, self).__init__(*args, **kwargs)
-        self.tagID = id(self)
+        self.tagID = uuid.uuid4().hex
 
     def copy(self):
         new = super(SVGShadow, self).copy()
@@ -132,7 +135,7 @@ class SVGShadow(Shadow):
 
     def __init__(self, *args, **kwargs):
         super(SVGShadow, self).__init__(*args, **kwargs)
-        self.tagID = id(self)
+        self.tagID = uuid.uuid4()
 
     def copy(self):
         new = super(SVGShadow, self).copy()
@@ -432,10 +435,11 @@ class SVGContext(BaseContext):
         self._svgContext.newline()
         self._svgEndClipPath()
 
-    def _image(self, path, (x, y), alpha, pageNumber):
+    def _image(self, path, xy, alpha, pageNumber):
         # todo:
         # support embedding of images when the source is not a path but
         # a nsimage or a pdf / gif with a pageNumber
+        x, y = xy
         self._svgBeginClipPath()
         if path.startswith("http"):
             url = AppKit.NSURL.URLWithString_(path)
@@ -461,9 +465,10 @@ class SVGContext(BaseContext):
     # helpers
 
     def _getUniqueID(self):
-        b = [chr(random.randrange(256)) for i in range(16)]
-        i = long(('%02x'*16) % tuple(map(ord, b)), 16)
-        return '%032x' % i
+        return uuid.uuid4().hex
+        # b = [chr(random.randrange(256)) for i in range(16)]
+        # i = long(('%02x'*16) % tuple(map(ord, b)), 16)
+        # return '%032x' % i
 
     def _svgTransform(self, transform):
         return "matrix(%s)" % (",".join([str(s) for s in transform]))
