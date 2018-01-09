@@ -10,7 +10,7 @@ from fontTools.misc.transform import Transform
 from mojo.roboFont import RGlyph, CurrentFont, CurrentGlyph
 
 
-layerNameRE = re.compile('\((.*?)\)')
+layerNameRE = re.compile(r'\((.*?)\)')
 
 
 class GlyphDrawBotError(Exception):
