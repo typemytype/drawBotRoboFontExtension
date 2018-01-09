@@ -1,3 +1,5 @@
+from __future__ import absolute_import
+
 import sys
 import os
 
@@ -6,8 +8,7 @@ from fontTools.pens.cocoaPen import CocoaPen
 from drawBot.drawBotDrawingTools import _drawBotDrawingTool
 from drawBot.context.baseContext import BezierPath
 from drawBot.context import subscribeContext
-from drawBot.context.tools.gifTools import gifsiclePath
-from drawBot.context.tools.traceImage import potrace, mkbitmap
+from drawBot.misc import getExternalToolPath
 
 from mojo.events import addObserver
 from mojo.extensions import getExtensionDefault
@@ -19,9 +20,12 @@ import glyphContext
 sys.path.append(os.path.dirname(__file__))
 
 # set the gifsicle tool as executable
-os.chmod(gifsiclePath, 0755)
-os.chmod(potrace, 0755)
-os.chmod(mkbitmap, 0755)
+gifsicle = getExternalToolPath(os.path.join(os.path.dirname(__file__), "drawBot", "context", "tools"), "gifsicle")
+potrace = getExternalToolPath(os.path.join(os.path.dirname(__file__), "drawBot", "context", "tools"), "potrace")
+mkbitmap = getExternalToolPath(os.path.join(os.path.dirname(__file__), "drawBot", "context", "tools"), "mkbitmap")
+os.chmod(gifsicle, 0o0755)
+os.chmod(potrace, 0o0755)
+os.chmod(mkbitmap, 0o0755)
 
 
 # add a drawGlyph callback
@@ -58,8 +62,14 @@ subscribeContext(glyphContext.GlyphContext)
 
 # reload the module to make them everwhere available
 import drawBot
-reload(drawBot)
+try:
+    reload
+except NameError:
+    # reload is not available on py3
+    import importlib
+    reload = importlib.reload
 
+reload(drawBot)
 
 class OpenFilesInDrawBotController(object):
 

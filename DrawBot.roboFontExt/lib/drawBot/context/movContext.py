@@ -13,6 +13,7 @@ from .pdfContext import PDFContext
 class MOVContext(PDFContext):
 
     fileExtensions = ["mov"]
+    saveImageOptions = []
 
     _saveMovieAttributes = {
         QTKit.QTAddImageCodecType: "png "
@@ -37,7 +38,7 @@ class MOVContext(PDFContext):
         length = seconds * self._frameScale
         self._frameDurationData[-1] = length, self._frameScale
 
-    def _writeDataToFile(self, data, path, multipage):
+    def _writeDataToFile(self, data, path, options):
         if os.path.exists(path):
             os.remove(path)
         movie, error = QTKit.QTMovie.alloc().initToWritableFile_error_(path, None)
@@ -48,10 +49,12 @@ class MOVContext(PDFContext):
 
         for index in range(pdfDocument.pageCount()):
             pool = AppKit.NSAutoreleasePool.alloc().init()
-            frameLength, frameScale = self._frameDurationData[index]
-            duration = QTKit.QTMakeTime(frameLength, frameScale)
-            page = pdfDocument.pageAtIndex_(index)
-            image = AppKit.NSImage.alloc().initWithData_(page.dataRepresentation())
-            movie.addImage_forDuration_withAttributes_(image, duration, self._saveMovieAttributes)
-            del pool
+            try:
+                frameLength, frameScale = self._frameDurationData[index]
+                duration = QTKit.QTMakeTime(frameLength, frameScale)
+                page = pdfDocument.pageAtIndex_(index)
+                image = AppKit.NSImage.alloc().initWithData_(page.dataRepresentation())
+                movie.addImage_forDuration_withAttributes_(image, duration, self._saveMovieAttributes)
+            finally:
+                del pool
         movie.updateMovieFile()

@@ -1,3 +1,5 @@
+from __future__ import division, absolute_import, print_function
+
 import AppKit
 import tempfile
 from xml.dom import minidom
@@ -5,15 +7,8 @@ import os
 
 from fontTools.misc.transform import Transform
 
-from imageObject import ImageObject
-from drawBot.scriptTools import _execute
-
-potrace = os.path.join(os.path.dirname(__file__), "potrace")
-if not os.path.exists(potrace):
-    potrace = AppKit.NSBundle.mainBundle().pathForResource_ofType_("potrace", None)
-mkbitmap = os.path.join(os.path.dirname(__file__), "mkbitmap")
-if not os.path.exists(mkbitmap):
-    mkbitmap = AppKit.NSBundle.mainBundle().pathForResource_ofType_("mkbitmap", None)
+from .imageObject import ImageObject
+from drawBot.misc import executeExternalProcess, getExternalToolPath
 
 
 def _getPath(element, path=None, pathItems=None):
@@ -295,6 +290,9 @@ def saveImageAsBitmap(image, bitmapPath):
 
 
 def TraceImage(path, outPen, threshold=.2, blur=None, invert=False, turd=2, tolerance=0.2, offset=None):
+    potrace = getExternalToolPath(os.path.dirname(__file__), "potrace")
+    mkbitmap = getExternalToolPath(os.path.dirname(__file__), "mkbitmap")
+
     if isinstance(path, ImageObject):
         image = path
     else:
@@ -309,6 +307,7 @@ def TraceImage(path, outPen, threshold=.2, blur=None, invert=False, turd=2, tole
 
     saveImageAsBitmap(image, imagePath)
 
+    assert mkbitmap is not None
     cmds = [mkbitmap, "-x", "-t", str(threshold)]
     if blur:
         cmds.extend(["-b", str(blur)])
@@ -321,18 +320,19 @@ def TraceImage(path, outPen, threshold=.2, blur=None, invert=False, turd=2, tole
         bitmapPath,
         imagePath
     ])
-    log = _execute(cmds)
+    log = executeExternalProcess(cmds)
     if log != ('', ''):
-        print log
+        print(log)
 
+    assert potrace is not None
     cmds = [potrace, "-s"]
     cmds.extend(["-t", str(turd)])
     cmds.extend(["-O", str(tolerance)])
     cmds.extend(["-o", svgPath, bitmapPath])
 
-    log = _execute(cmds)
+    log = executeExternalProcess(cmds)
     if log != ('', ''):
-        print log
+        print(log)
 
     importSVGWithPen(svgPath, outPen, (x, y, w, h), offset)
 

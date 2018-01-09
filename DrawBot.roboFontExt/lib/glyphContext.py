@@ -106,8 +106,8 @@ class GlyphContext(BaseContext):
             hyphenation=self._state.hyphenation)
         self.drawPath(outLinePath)
 
-    def _image(self, path, (x, y), alpha):
-        image = self._glyphs[-1].addImage(path, (x, y))
+    def _image(self, path, xy, alpha):
+        image = self._glyphs[-1].addImage(path, xy)
         image.brightness = alpha
         image.transformation = self._state.transformMatrix
 

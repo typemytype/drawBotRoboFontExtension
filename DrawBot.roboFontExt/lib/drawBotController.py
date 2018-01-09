@@ -19,7 +19,7 @@ from drawBot.misc import warnings
 from drawBot.ui.splitView import SplitView
 
 from drawBotViews import CodeEditor
-from drawBotTools import StdOutput, DrawBotNamespace, CallbackRunner, createSavePDFImage
+from drawBotTools import StdOutput, CallbackRunner, createSavePDFImage
 
 
 class DrawBotController(BaseWindowController):
@@ -150,7 +150,7 @@ class DrawBotController(BaseWindowController):
         # reset the drawing tool
         _drawBotDrawingTool.newDrawing()
         # create a namespace
-        namespace = DrawBotNamespace(_drawBotDrawingTool, _drawBotDrawingTool._magicVariables)
+        namespace = {}
         # add the tool callbacks in the name space
         _drawBotDrawingTool._addToNamespace(namespace)
         # when enabled clear the output text view

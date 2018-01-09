@@ -2,6 +2,8 @@ import AppKit
 
 import sys
 import os
+import subprocess
+from fontTools.misc.transform import Transform
 
 
 # ==========
@@ -153,6 +155,32 @@ def stringToInt(code):
     return struct.unpack('>l', code)[0]
 
 
+def transformationAtCenter(matrix, centerPoint):
+    """Helper function for rotate(), scale() and skew() to apply a transformation
+    with a specified center point.
+
+        >>> transformationAtCenter((2, 0, 0, 2, 0, 0), (0, 0))
+        (2, 0, 0, 2, 0, 0)
+        >>> transformationAtCenter((2, 0, 0, 2, 0, 0), (100, 200))
+        (2, 0, 0, 2, -100, -200)
+        >>> transformationAtCenter((-2, 0, 0, 2, 0, 0), (100, 200))
+        (-2, 0, 0, 2, 300, -200)
+        >>> t = Transform(*transformationAtCenter((0, 1, 1, 0, 0, 0), (100, 200)))
+        >>> t.transformPoint((100, 200))
+        (100, 200)
+        >>> t.transformPoint((0, 0))
+        (-100, 100)
+    """
+    if centerPoint == (0, 0):
+        return matrix
+    t = Transform()
+    cx, cy = centerPoint
+    t = t.translate(cx, cy)
+    t = t.transform(matrix)
+    t = t.translate(-cx, -cy)
+    return tuple(t)
+
+
 # ============
 # = warnings =
 # ============
@@ -260,3 +288,43 @@ class VariableController(object):
 
     def documentWindowToFront(self, sender=None):
         self.w.makeKey()
+
+
+def executeExternalProcess(cmds, cwd=None):
+    r"""
+        >>> stdout, stderr = executeExternalProcess(["which", "ls"])
+        >>> stdout
+        '/bin/ls\n'
+        >>> assert stdout == '/bin/ls\n'
+        >>> executeExternalProcess(["which", "fooooo"])
+        Traceback (most recent call last):
+            ...
+        RuntimeError: 'which' failed with error code 1
+        >>> stdout, stderr = executeExternalProcess(["python", "-S", "-c", "print('hello')"])
+        >>> stdout
+        'hello\n'
+    """
+    p = subprocess.Popen(cmds, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, universal_newlines=True)
+    stdoutdata, stderrdata = p.communicate()
+    assert p.returncode is not None
+    if p.returncode != 0:
+        sys.stdout.write(stdoutdata)
+        sys.stderr.write(stderrdata)
+        raise RuntimeError("%r failed with error code %s" % (os.path.basename(cmds[0]), p.returncode))
+    return stdoutdata, stderrdata
+
+
+def getExternalToolPath(root, toolName):
+    toolPath = os.path.join(root, toolName)
+    if not os.path.exists(toolPath):
+        toolPath = AppKit.NSBundle.mainBundle().pathForResource_ofType_(toolName, None)
+        if toolPath is None or not os.path.exists(toolPath):
+            import drawBot
+            root = os.path.dirname(drawBot.__file__)
+            toolPath = os.path.join(root, "..", "Resources", "externalTools", toolName)
+    return toolPath
+
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testmod()

@@ -1,3 +1,4 @@
+from fontTools.misc.py23 import PY2
 import sys
 import traceback
 
@@ -11,11 +12,12 @@ class StdOutput(object):
         self.isError = isError
 
     def write(self, data):
-        if isinstance(data, str):
-            try:
-                data = unicode(data, "utf-8", "replace")
-            except UnicodeDecodeError:
-                data = "XXX " + repr(data)
+        if PY2:
+            if isinstance(data, str):
+                try:
+                    data = unicode(data, "utf-8", "replace")
+                except UnicodeDecodeError:
+                    data = "XXX " + repr(data)
         self.data.append((data, self.isError))
 
     def flush(self):
@@ -23,18 +25,6 @@ class StdOutput(object):
 
     def close(self):
         pass
-
-
-class DrawBotNamespace(dict):
-
-    def __init__(self, context, variables):
-        self._context = context
-        self._variables = variables
-
-    def __getitem__(self, item):
-        if item in self._variables:
-            return getattr(self._context, item)
-        return super(DrawBotNamespace, self).__getitem__(item)
 
 
 def CallbackRunner(callback, stdout=None, stderr=None, args=[], kwargs={}, fallbackResult=None):

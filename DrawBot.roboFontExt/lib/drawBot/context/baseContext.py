@@ -9,7 +9,7 @@ import math
 from fontTools.pens.basePen import BasePen
 from fontTools.misc.py23 import basestring, PY2, unichr
 
-from drawBot.misc import DrawBotError, cmyk2rgb, warnings
+from drawBot.misc import DrawBotError, cmyk2rgb, warnings, transformationAtCenter
 
 from .tools import openType
 from .tools import variation
@@ -294,7 +294,7 @@ class BezierPath(BasePen):
         * `tolerance`: the precision tolerance of the vector outline
         * `offset`: add the traced vector outline with an offset to the BezierPath
         """
-        from tools import traceImage
+        from .tools import traceImage
         traceImage.TraceImage(path, self, threshold, blur, invert, turd, tolerance, offset)
 
     def getNSBezierPath(self):
@@ -413,39 +413,45 @@ class BezierPath(BasePen):
         """
         self.transform((1, 0, 0, 1, x, y))
 
-    def rotate(self, angle):
+    def rotate(self, angle, center=(0, 0)):
         """
-        Rotate the path around the origin point with a given angle in degrees.
+        Rotate the path around the `center` point (which is the origin by default) with a given angle in degrees.
         """
         angle = math.radians(angle)
         c = math.cos(angle)
         s = math.sin(angle)
-        self.transform((c, s, -s, c, 0, 0))
+        self.transform((c, s, -s, c, 0, 0), center)
 
-    def scale(self, x=1, y=None):
+    def scale(self, x=1, y=None, center=(0, 0)):
         """
         Scale the path with a given `x` (horizontal scale) and `y` (vertical scale).
 
         If only 1 argument is provided a proportional scale is applied.
+
+        The center of scaling can optionally be set via the `center` keyword argument. By default this is the origin.
         """
         if y is None:
             y = x
-        self.transform((x, 0, 0, y, 0, 0))
+        self.transform((x, 0, 0, y, 0, 0), center)
 
-    def skew(self, angle1, angle2=0):
+    def skew(self, angle1, angle2=0, center=(0, 0)):
         """
         Skew the path with given `angle1` and `angle2`.
 
         If only one argument is provided a proportional skew is applied.
+
+        The center of skewing can optionally be set via the `center` keyword argument. By default this is the origin.
         """
         angle1 = math.radians(angle1)
         angle2 = math.radians(angle2)
-        self.transform((1, math.tan(angle2), math.tan(angle1), 1, 0, 0))
+        self.transform((1, math.tan(angle2), math.tan(angle1), 1, 0, 0), center)
 
-    def transform(self, transformMatrix):
+    def transform(self, transformMatrix, center=(0, 0)):
         """
         Transform a path with a transform matrix (xy, xx, yy, yx, x, y).
         """
+        if center != (0, 0):
+            transformMatrix = transformationAtCenter(transformMatrix, center)
         aT = AppKit.NSAffineTransform.transform()
         aT.setTransformStruct_(transformMatrix[:])
         self._path.transformUsingAffineTransform_(aT)
@@ -466,6 +472,7 @@ class BezierPath(BasePen):
         """
         Return the union between two bezier paths.
         """
+        assert isinstance(other, self.__class__)
         import booleanOperations
         contours = self._contoursForBooleanOperations() + other._contoursForBooleanOperations()
         result = self.__class__()
@@ -487,6 +494,7 @@ class BezierPath(BasePen):
         """
         Return the difference between two bezier paths.
         """
+        assert isinstance(other, self.__class__)
         import booleanOperations
         subjectContours = self._contoursForBooleanOperations()
         clipContours = other._contoursForBooleanOperations()
@@ -498,6 +506,7 @@ class BezierPath(BasePen):
         """
         Return the intersection between two bezier paths.
         """
+        assert isinstance(other, self.__class__)
         import booleanOperations
         subjectContours = self._contoursForBooleanOperations()
         clipContours = other._contoursForBooleanOperations()
@@ -509,12 +518,26 @@ class BezierPath(BasePen):
         """
         Return the xor between two bezier paths.
         """
+        assert isinstance(other, self.__class__)
         import booleanOperations
         subjectContours = self._contoursForBooleanOperations()
         clipContours = other._contoursForBooleanOperations()
         result = self.__class__()
         booleanOperations.xor(subjectContours, clipContours, result)
         return result
+
+    def intersectionPoints(self, other=None):
+        """
+        Return a list of intersection points as `x`, `y` tuples.
+
+        Optionaly provide an other path object to find intersection points.
+        """
+        import booleanOperations
+        contours = self._contoursForBooleanOperations()
+        if other is not None:
+            assert isinstance(other, self.__class__)
+            contours += other._contoursForBooleanOperations()
+        return booleanOperations.getIntersections(contours)
 
     def __mod__(self, other):
         return self.difference(other)
@@ -649,21 +672,21 @@ class Color(object):
         return new
 
     @classmethod
-    def getColorsFromList(self, inputColors):
+    def getColorsFromList(cls, inputColors):
         outputColors = []
         for color in inputColors:
-            color = self.getColor(color)
+            color = cls.getColor(color)
             outputColors.append(color)
         return outputColors
 
     @classmethod
-    def getColor(self, color):
-        if isinstance(color, self.__class__):
+    def getColor(cls, color):
+        if isinstance(color, cls.__class__):
             return color
         elif isinstance(color, (tuple, list)):
-            return self(*color)
+            return cls(*color)
         elif isinstance(color, AppKit.NSColor):
-            return self(color)
+            return cls(color)
         raise DrawBotError("Not a valid color: %s" % color)
 
 
@@ -812,6 +835,10 @@ class FormattedString(object):
         # create all _<attributes> in the formatted text object
         # with default values
         for key, value in self._formattedAttributes.items():
+            if isinstance(value, dict):
+                value = dict(value)
+            if isinstance(value, list):
+                value = list(value)
             setattr(self, "_%s" % key, value)
         attributes = self._validateAttributes(kwargs, addDefaults=False)
         if txt:
@@ -991,6 +1018,10 @@ class FormattedString(object):
             elif self._cmykStroke:
                 strokeColor = self._cmykColorClass.getColor(self._cmykStroke).getNSObject()
             attributes[AppKit.NSStrokeColorAttributeName] = strokeColor
+            # stroke width must be negative
+            # Supply a negative value for NSStrokeWidthAttributeName
+            # when you wish to draw a string that is both filled and stroked.
+            # see https://developer.apple.com/library/content/qa/qa1531/_index.html
             attributes[AppKit.NSStrokeWidthAttributeName] = -abs(self._strokeWidth)
         para = AppKit.NSMutableParagraphStyle.alloc().init()
         if self._align:
@@ -1009,9 +1040,10 @@ class FormattedString(object):
                 tabStop = AppKit.NSTextTab.alloc().initWithTextAlignment_location_options_(tabAlign, tab, tabOptions)
                 para.addTabStop_(tabStop)
         if self._lineHeight is not None:
-            # para.setLineSpacing_(lineHeight)
-            para.setMaximumLineHeight_(self._lineHeight)
+            # para.setLineSpacing_(0.0)
+            # para.setLineHeightMultiple_(1)
             para.setMinimumLineHeight_(self._lineHeight)
+            para.setMaximumLineHeight_(self._lineHeight)
 
         if self._indent is not None:
             para.setHeadIndent_(self._indent)
@@ -1224,6 +1256,7 @@ class FormattedString(object):
 
         .. downloadcode:: openTypeFeaturesFormattedString.py
 
+            size(1000, 200)
             # create an empty formatted string object
             t = FormattedString()
             # set a font
@@ -1237,7 +1270,7 @@ class FormattedString(object):
             # add some text
             t += " 0123456789 Hello"
             # draw the formatted string
-            text(t, (10, 100))
+            text(t, (10, 80))
         """
         if args and args[0] is None:
             self._openTypeFeatures.clear()
@@ -1306,11 +1339,12 @@ class FormattedString(object):
         .. downloadcode:: indent.py
 
             # setting up some variables
-            x, y, w, h = 10, 10, 200, 300
+            x, y, w, h = 10, 10, 500, 600
 
-            txtIndent = 50
-            txtFirstLineIndent = 70
-            txtTailIndent = -50
+            txtIndent = 100
+            txtFirstLineIndent = 200
+            txtTailIndent = -100
+            txtFontSize = 22
 
             paragraphTop = 3
             paragraphBottom = 10
@@ -1339,7 +1373,7 @@ class FormattedString(object):
             rect(x, y, w, h)
 
             # create a formatted string
-            t = FormattedString()
+            t = FormattedString(fontSize=txtFontSize)
             # set alignment
             t.align("justified")
             # add text
@@ -1347,7 +1381,7 @@ class FormattedString(object):
             # add hard return
             t += "\\n"
             # set style for indented text
-            t.fontSize(6)
+            t.fontSize(txtFontSize*.6)
             t.paragraphTopSpacing(paragraphTop)
             t.paragraphBottomSpacing(paragraphBottom)
             t.firstLineIndent(txtFirstLineIndent)
@@ -1358,7 +1392,7 @@ class FormattedString(object):
             # add hard return
             t += "\\n"
             # reset style
-            t.fontSize(10)
+            t.fontSize(txtFontSize)
             t.indent(None)
             t.tailIndent(None)
             t.firstLineIndent(None)
@@ -1547,16 +1581,17 @@ class FormattedString(object):
 
         .. downloadcode:: appendGlyphFormattedString.py
 
+            size(1000, 400)
             # create an empty formatted string object
             t = FormattedString()
             # set a font
             t.font("Menlo-Regular")
             # set a font size
-            t.fontSize(60)
-            # add some glyphs
-            t.appendGlyph("Eng", "Eng.alt")
+            t.fontSize(300)
+            # add some glyphs by glyph name
+            t.appendGlyph("A", "ampersand", "Eng", "Eng.alt")
             # draw the formatted string
-            text(t, (10, 100))
+            text(t, (100, 100))
         """
         # use a non breaking space as replacement character
         baseString = unichr(0x00A0)
@@ -1669,6 +1704,8 @@ class BaseContext(object):
     _gradientClass = Gradient
 
     fileExtensions = []
+    saveImageOptions = []
+    validateSaveImageOptions = True
 
     _lineJoinStylesMap = dict(
         miter=Quartz.kCGLineJoinMiter,
@@ -1768,7 +1805,7 @@ class BaseContext(object):
     def _reset(self, other=None):
         pass
 
-    def _saveImage(self, path, multipage):
+    def _saveImage(self, path, options):
         pass
 
     def _printImage(self, pdf=None):
@@ -1802,10 +1839,10 @@ class BaseContext(object):
         self.hasPage = True
         self._newPage(width, height)
 
-    def saveImage(self, path, multipage):
+    def saveImage(self, path, options):
         if not self.hasPage:
             raise DrawBotError("can't save image when no page is set")
-        self._saveImage(path, multipage)
+        self._saveImage(path, options)
 
     def printImage(self, pdf=None):
         self._printImage(pdf)
