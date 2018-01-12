@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from AppKit import *
 
 import sys
@@ -75,7 +76,7 @@ class DrawBotController(BaseWindowController):
                 callback=self.toolbarSave,
                 ),
             dict(itemIdentifier="savePDF",
-                label="Save PDF",
+                label=u"Save PDF…",
                 imageObject=createSavePDFImage(),
                 callback=self.toolbarSavePDF,
                 ),
@@ -93,13 +94,13 @@ class DrawBotController(BaseWindowController):
                 callback=self.toolbarNewScript,
                 ),
             dict(itemIdentifier="open",
-                label="Open",
+                label=u"Open…",
                 imageNamed="toolbarScriptOpen",
                 callback=self.toolbarOpen,
                 ),
             dict(itemIdentifier=NSToolbarFlexibleSpaceItemIdentifier),
             ]
-        toolbar = self.w.addToolbar(toolbarIdentifier="tinyDrawBotScriptingToolbar", toolbarItems=toolbarItems, addStandardItems=False)
+        self.w.addToolbar(toolbarIdentifier="DrawBotRoboFontExtensionToolbar", toolbarItems=toolbarItems, addStandardItems=False)
 
         # the code editor
         self.codeView = CodeEditor((0, 0, -0, -0))
