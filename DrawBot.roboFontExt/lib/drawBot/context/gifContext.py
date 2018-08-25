@@ -1,28 +1,28 @@
-import AppKit
+from __future__ import absolute_import
+
 import Quartz
 
-import os
 import tempfile
-import subprocess
 
-from imageContext import ImageContext
+from .imageContext import ImageContext, getSaveImageOptions
 
-gifsiclePath = os.path.join(os.path.dirname(__file__), "tools", "gifsicle")
-if not os.path.exists(gifsiclePath):
-    gifsiclePath = os.path.join(os.getcwd(), "tools", "gifsicle")
+from .tools.gifTools import generateGif
 
-class GifContext(ImageContext):
 
-    _saveImageFileTypes = {
-        "gif" : AppKit.NSGIFFileType,
-        }
+class GIFContext(ImageContext):
 
-    fileExtensions = _saveImageFileTypes.keys()
+    fileExtensions = ["gif"]
+
+    saveImageOptions = getSaveImageOptions([
+        "imageGIFDitherTransparency",
+        "imageGIFRGBColorTable",
+        "imageColorSyncProfileData",
+    ])
 
     _delay = 10
 
     def __init__(self):
-        super(GifContext, self).__init__()
+        super(GIFContext, self).__init__()
         self._delayData = []
 
     def _frameDuration(self, seconds):
@@ -30,50 +30,20 @@ class GifContext(ImageContext):
         self._delayData[-1] = int(seconds * 100)
 
     def _newPage(self, width, height):
-        super(GifContext, self)._newPage(width, height)
+        super(GIFContext, self)._newPage(width, height)
         self._delayData.append(self._delay)
 
-    def _writeDataToFile(self, data, path, multipage):
+    def _writeDataToFile(self, data, path, options):
         pdfDocument = Quartz.PDFDocument.alloc().initWithData_(data)
         pageCount = pdfDocument.pageCount()
         shouldBeAnimated = pageCount > 1
 
         tempPath = path
         if shouldBeAnimated:
+            options["multipage"] = True
             tempPath = tempfile.mkstemp(suffix=".gif")[1]
 
-        inputPaths = super(GifContext, self)._writeDataToFile(data, tempPath, shouldBeAnimated)
+        inputPaths = super(GIFContext, self)._writeDataToFile(data, tempPath, options)
 
         if shouldBeAnimated:
-            cmds = [
-                # gifsicle path
-                gifsiclePath,
-                # optimize level
-                # "-O3",
-                # force to 256 colors
-                "--colors", "256",
-                # make it loop
-                "--loop",
-            ]
-            # add source paths with delay for each frame
-            for i, inputPath in enumerate(inputPaths):
-                cmds += [
-                        # add the frame duration
-                        "--delay", "%i" % self._delayData[i],
-                        # add the input gif for each frame
-                        inputPath
-                    ]
-
-            cmds += [
-                # output path
-                "--output",
-                path
-            ]
-            # make a string of escaped commands
-            cmds = subprocess.list2cmdline(cmds)
-            # go
-            popen = subprocess.Popen(cmds, shell=True)
-            popen.wait()
-            # remove the temp input gifs
-            for inputPath in inputPaths:
-                os.remove(inputPath)
+            generateGif(inputPaths, path, self._delayData)

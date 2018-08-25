@@ -1,9 +1,20 @@
+from __future__ import absolute_import
+
+import platform
+from distutils.version import StrictVersion
 import AppKit
 import CoreText
 import Quartz
 
-from baseContext import BaseContext, FormattedString
-from drawBot.misc import DrawBotError
+from .tools import gifTools
+
+from .baseContext import BaseContext
+from drawBot.misc import DrawBotError, isPDF, isGIF
+
+
+osVersionCurrent = StrictVersion(platform.mac_ver()[0])
+osVersion10_11 = StrictVersion("10.11")
+osVersion10_13 = StrictVersion("10.13")
 
 
 def sendPDFtoPrinter(pdfDocument):
@@ -17,6 +28,9 @@ def sendPDFtoPrinter(pdfDocument):
 class PDFContext(BaseContext):
 
     fileExtensions = ["pdf"]
+    saveImageOptions = [
+        ("multipage", "If False, only the last page in the document will be saved into the output PDF. This value is ignored if it is None (default)."),
+    ]
 
     def __init__(self):
         super(PDFContext, self).__init__()
@@ -46,13 +60,18 @@ class PDFContext(BaseContext):
         Quartz.CGPDFContextClose(self._pdfContext)
         self._hasContext = False
 
-    def _saveImage(self, path, multipage):
-        self._closeContext()
-        self._writeDataToFile(self._pdfData, path, multipage)
-        self._pdfContext = None
-        self._pdfData = None
+    def _saveImage(self, path, options):
+        pool = AppKit.NSAutoreleasePool.alloc().init()
+        try:
+            self._closeContext()
+            self._writeDataToFile(self._pdfData, path, options)
+            self._pdfContext = None
+            self._pdfData = None
+        finally:
+            del pool
 
-    def _writeDataToFile(self, data, path, multipage):
+    def _writeDataToFile(self, data, path, options):
+        multipage = options.get("multipage")
         if multipage is None:
             multipage = True
         if not multipage:
@@ -76,6 +95,10 @@ class PDFContext(BaseContext):
 
     def _restore(self):
         Quartz.CGContextRestoreGState(self._pdfContext)
+
+    def _blendMode(self, operation):
+        value = self._blendModeMap[operation]
+        Quartz.CGContextSetBlendMode(self._pdfContext, value)
 
     def _drawPath(self):
         if self._state.path:
@@ -121,19 +144,19 @@ class PDFContext(BaseContext):
             self._pdfPath(self._state.path)
             Quartz.CGContextClip(self._pdfContext)
 
-    def _textBox(self, txt, (x, y, w, h), align):
-        canDoGradients = not isinstance(txt, FormattedString)
+    def _textBox(self, txt, box, align):
+        path, (x, y) = self._getPathForFrameSetter(box)
+
+        canDoGradients = True
         attrString = self.attributedString(txt, align=align)
-        if self._state.text.hyphenation:
-            attrString = self.hyphenateAttributedString(attrString, w)
+        if self._state.hyphenation:
+            attrString = self.hyphenateAttributedString(attrString, path)
 
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
-        path = Quartz.CGPathCreateMutable()
-        Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(x, y, w, h))
-        box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
+        frame = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
 
-        ctLines = CoreText.CTFrameGetLines(box)
-        origins = CoreText.CTFrameGetLineOrigins(box, (0, len(ctLines)), None)
+        ctLines = CoreText.CTFrameGetLines(frame)
+        origins = CoreText.CTFrameGetLineOrigins(frame, (0, len(ctLines)), None)
         for i, (originX, originY) in enumerate(origins):
             ctLine = ctLines[i]
             bounds = CoreText.CTLineGetImageBounds(ctLine, self._pdfContext)
@@ -145,7 +168,7 @@ class PDFContext(BaseContext):
                 fillColor = attributes.get(AppKit.NSForegroundColorAttributeName)
                 strokeColor = attributes.get(AppKit.NSStrokeColorAttributeName)
                 strokeWidth = attributes.get(AppKit.NSStrokeWidthAttributeName, self._state.strokeWidth)
-
+                baselineShift = attributes.get(AppKit.NSBaselineOffsetAttributeName, 0)
                 self._save()
                 drawingMode = None
                 if self._state.shadow is not None:
@@ -158,13 +181,13 @@ class PDFContext(BaseContext):
                         self._state.fillColor = None
                         self._state.cmykColor = None
                         Quartz.CGContextSetTextDrawingMode(self._pdfContext, Quartz.kCGTextFill)
-                        Quartz.CGContextSetTextPosition(self._pdfContext, x+originX, y+originY)
+                        Quartz.CGContextSetTextPosition(self._pdfContext, x+originX, y+originY+baselineShift)
                         CoreText.CTRunDraw(ctRun, self._pdfContext, (0, 0))
                         self._restore()
                 if canDoGradients and self._state.gradient is not None:
                     self._save()
                     Quartz.CGContextSetTextDrawingMode(self._pdfContext, Quartz.kCGTextClip)
-                    Quartz.CGContextSetTextPosition(self._pdfContext, x+originX, y+originY)
+                    Quartz.CGContextSetTextPosition(self._pdfContext, x+originX, y+originY+baselineShift)
                     CoreText.CTRunDraw(ctRun, self._pdfContext, (0, 0))
                     self._pdfGradient(self._state.gradient)
                     self._restore()
@@ -175,7 +198,7 @@ class PDFContext(BaseContext):
                 if strokeColor is not None:
                     drawingMode = Quartz.kCGTextStroke
                     self._pdfStrokeColor(strokeColor)
-                    Quartz.CGContextSetLineWidth(self._pdfContext, strokeWidth)
+                    Quartz.CGContextSetLineWidth(self._pdfContext, abs(strokeWidth))
                     if self._state.lineDash is not None:
                         Quartz.CGContextSetLineDash(self._pdfContext, 0, self._state.lineDash, len(self._state.lineDash))
                     if self._state.miterLimit is not None:
@@ -186,42 +209,82 @@ class PDFContext(BaseContext):
                         Quartz.CGContextSetLineJoin(self._pdfContext, self._state.lineJoin)
                 if fillColor is not None and strokeColor is not None:
                     drawingMode = Quartz.kCGTextFillStroke
+                    if osVersionCurrent >= osVersion10_11 and osVersion10_11 < osVersion10_13:
+                        # solve bug in OSX where the stroke color is the same as the fill color
+                        # simple solution: draw it twice...
+                        drawingMode = Quartz.kCGTextFill
+                        Quartz.CGContextSetTextDrawingMode(self._pdfContext, drawingMode)
+                        Quartz.CGContextSetTextPosition(self._pdfContext, x+originX, y+originY+baselineShift)
+                        CoreText.CTRunDraw(ctRun, self._pdfContext, (0, 0))
+                        drawingMode = Quartz.kCGTextStroke
 
                 if drawingMode is not None:
                     Quartz.CGContextSetTextDrawingMode(self._pdfContext, drawingMode)
-                    Quartz.CGContextSetTextPosition(self._pdfContext, x+originX, y+originY)
+                    Quartz.CGContextSetTextPosition(self._pdfContext, x+originX, y+originY+baselineShift)
                     CoreText.CTRunDraw(ctRun, self._pdfContext, (0, 0))
                 self._restore()
 
-    def _getImageSource(self, key):
+    def _getImageSource(self, key, pageNumber):
         path = key
         image = None
+        _isPDF = False
         if isinstance(key, AppKit.NSImage):
             image = key
             key = id(key)
+        if pageNumber is not None:
+            key = "%s-%s" % (key, pageNumber)
         if key not in self._cachedImages:
             if image is None:
                 if path.startswith("http"):
                     url = AppKit.NSURL.URLWithString_(path)
                 else:
                     url = AppKit.NSURL.fileURLWithPath_(path)
-                image = AppKit.NSImage.alloc().initByReferencingURL_(url)
-            data = image.TIFFRepresentation()
-            source = Quartz.CGImageSourceCreateWithData(data, {})
-            if source is not None:
-                self._cachedImages[key] = Quartz.CGImageSourceCreateImageAtIndex(source, 0, None)
-            else:
-                raise DrawBotError("No image found at %s" % key)
+                _isPDF, _ = isPDF(url)
+                _isGIF, _ = isGIF(url)
+                if _isPDF:
+                    pdf = Quartz.CGPDFDocumentCreateWithURL(url)
+                    if pdf is not None:
+                        if pageNumber is None:
+                            pageNumber = Quartz.CGPDFDocumentGetNumberOfPages(pdf)
+                        self._cachedImages[key] = _isPDF, Quartz.CGPDFDocumentGetPage(pdf, pageNumber)
+                    else:
+                        raise DrawBotError("No pdf found at %s" % key)
+                elif _isGIF:
+                    if pageNumber is None:
+                        pageNumber = gifTools.gifFrameCount(url)
+                    image = gifTools.gifFrameAtIndex(url, pageNumber-1)
+                    data = image.TIFFRepresentation()
+                    source = Quartz.CGImageSourceCreateWithData(data, {})
+                    if source is not None:
+                        self._cachedImages[key] = False, Quartz.CGImageSourceCreateImageAtIndex(source, 0, None)
+                    else:
+                        raise DrawBotError("No image found at frame %s in %s" % (pageNumber, key))
+                else:
+                    image = AppKit.NSImage.alloc().initByReferencingURL_(url)
+            if image and not _isPDF:
+                data = image.TIFFRepresentation()
+                source = Quartz.CGImageSourceCreateWithData(data, {})
+                if source is not None:
+                    self._cachedImages[key] = _isPDF, Quartz.CGImageSourceCreateImageAtIndex(source, 0, None)
+                else:
+                    raise DrawBotError("No image found at %s" % key)
         return self._cachedImages[key]
 
-    def _image(self, path, (x, y), alpha):
+    def _image(self, path, xy, alpha, pageNumber):
+        x, y = xy
         self._save()
-        image = self._getImageSource(path)
+        _isPDF, image = self._getImageSource(path, pageNumber)
         if image is not None:
-            w = Quartz.CGImageGetWidth(image)
-            h = Quartz.CGImageGetHeight(image)
             Quartz.CGContextSetAlpha(self._pdfContext, alpha)
-            Quartz.CGContextDrawImage(self._pdfContext, Quartz.CGRectMake(x, y, w, h), image)
+            if _isPDF:
+                Quartz.CGContextSaveGState(self._pdfContext)
+                Quartz.CGContextTranslateCTM(self._pdfContext, x, y)
+                Quartz.CGContextDrawPDFPage(self._pdfContext, image)
+                Quartz.CGContextRestoreGState(self._pdfContext)
+            else:
+                w = Quartz.CGImageGetWidth(image)
+                h = Quartz.CGImageGetHeight(image)
+                Quartz.CGContextDrawImage(self._pdfContext, Quartz.CGRectMake(x, y, w, h), image)
         self._restore()
 
     def _transform(self, transform):
@@ -273,8 +336,18 @@ class PDFContext(BaseContext):
         else:
             c = shadow.color.getNSObject()
             color = self._rgbNSColorToCGColor(c)
-
-        Quartz.CGContextSetShadowWithColor(self._pdfContext, self._state.shadow.offset, self._state.shadow.blur, color)
+        # XXX
+        # needs to be solved
+        # for now adjust the documentation
+        # currentTransformation = Quartz.CGContextGetUserSpaceToDeviceSpaceTransform(self._pdfContext)
+        # scaleX = math.sqrt(currentTransformation[0] * currentTransformation[0] + currentTransformation[1] * currentTransformation[1])
+        # scaleY = math.sqrt(currentTransformation[2] * currentTransformation[2] + currentTransformation[3] * currentTransformation[3])
+        x, y = self._state.shadow.offset
+        # x *= scaleX
+        # y *= scaleY
+        blur = self._state.shadow.blur
+        # blur *= (scaleX + scaleY) / 2.
+        Quartz.CGContextSetShadowWithColor(self._pdfContext, (x, y), blur, color)
 
     def _pdfGradient(self, gradient):
         if gradient.cmykColors:
@@ -285,7 +358,7 @@ class PDFContext(BaseContext):
                 cgColor = self._cmykNSColorToCGColor(c)
                 colors.append(cgColor)
         else:
-            colorSpace = Quartz.CGColorSpaceCreateDeviceRGB()
+            colorSpace = self._colorClass.colorSpace().CGColorSpace()
             colors = []
             for color in gradient.colors:
                 c = color.getNSObject()
@@ -312,4 +385,21 @@ class PDFContext(BaseContext):
         return Quartz.CGColorCreateGenericCMYK(c.cyanComponent(), c.magentaComponent(), c.yellowComponent(), c.blackComponent(), c.alphaComponent())
 
     def _rgbNSColorToCGColor(self, c):
+        if c.numberOfComponents() == 2:
+            # gray color
+            return Quartz.CGColorCreateGenericGray(c.whiteComponent(), c.alphaComponent())
         return Quartz.CGColorCreateGenericRGB(c.redComponent(), c.greenComponent(), c.blueComponent(), c.alphaComponent())
+
+    def _linkDestination(self, name, xy):
+        x, y = xy
+        if (x, y) == (None, None):
+            x, y = self.width * 0.5, self.height * 0.5
+        x = max(0, min(x, self.width))
+        y = max(0, min(y, self.height))
+        centerPoint = Quartz.CGPoint(x, y)
+        Quartz.CGPDFContextAddDestinationAtPoint(self._pdfContext, name, centerPoint)
+
+    def _linkRect(self, name, xywh):
+        x, y, w, h = xywh
+        rectBox = Quartz.CGRectMake(x, y, w, h)
+        Quartz.CGPDFContextSetDestinationForRect(self._pdfContext, name, rectBox)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from AppKit import *
 
 import sys
@@ -19,7 +20,7 @@ from drawBot.misc import warnings
 from drawBot.ui.splitView import SplitView
 
 from drawBotViews import CodeEditor
-from drawBotTools import StdOutput, DrawBotNamespace, CallbackRunner, createSavePDFImage
+from drawBotTools import StdOutput, CallbackRunner, createSavePDFImage
 
 
 class DrawBotController(BaseWindowController):
@@ -75,7 +76,7 @@ class DrawBotController(BaseWindowController):
                 callback=self.toolbarSave,
                 ),
             dict(itemIdentifier="savePDF",
-                label="Save PDF",
+                label=u"Save PDF…",
                 imageObject=createSavePDFImage(),
                 callback=self.toolbarSavePDF,
                 ),
@@ -93,13 +94,13 @@ class DrawBotController(BaseWindowController):
                 callback=self.toolbarNewScript,
                 ),
             dict(itemIdentifier="open",
-                label="Open",
+                label=u"Open…",
                 imageNamed="toolbarScriptOpen",
                 callback=self.toolbarOpen,
                 ),
             dict(itemIdentifier=NSToolbarFlexibleSpaceItemIdentifier),
             ]
-        toolbar = self.w.addToolbar(toolbarIdentifier="tinyDrawBotScriptingToolbar", toolbarItems=toolbarItems, addStandardItems=False)
+        self.w.addToolbar(toolbarIdentifier="DrawBotRoboFontExtensionToolbar", toolbarItems=toolbarItems, addStandardItems=False)
 
         # the code editor
         self.codeView = CodeEditor((0, 0, -0, -0))
@@ -150,7 +151,7 @@ class DrawBotController(BaseWindowController):
         # reset the drawing tool
         _drawBotDrawingTool.newDrawing()
         # create a namespace
-        namespace = DrawBotNamespace(_drawBotDrawingTool, _drawBotDrawingTool._magicVariables)
+        namespace = {}
         # add the tool callbacks in the name space
         _drawBotDrawingTool._addToNamespace(namespace)
         # when enabled clear the output text view
@@ -184,7 +185,8 @@ class DrawBotController(BaseWindowController):
         else:
             # if the panes are not visible, clear the draw view
             self.drawView.setPDFDocument(None)
-
+        # drawing is done
+        _drawBotDrawingTool.endDrawing()
         # set the catched print statements and tracebacks in the the output text view
         for text, isError in self.output:
             if liveCoding and isError:

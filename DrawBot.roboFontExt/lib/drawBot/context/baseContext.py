@@ -1,67 +1,127 @@
+from __future__ import absolute_import
+
 import AppKit
 import CoreText
 import Quartz
 
-from drawBot.misc import DrawBotError, cmyk2rgb, warnings
+import math
 
-from tools import openType
+from fontTools.pens.basePen import BasePen
+from fontTools.misc.py23 import basestring, PY2, unichr
+
+from drawBot.misc import DrawBotError, cmyk2rgb, warnings, transformationAtCenter
+
+from .tools import openType
+from .tools import variation
+
 
 _FALLBACKFONT = "LucidaGrande"
 
 
-class BezierPath(object):
+def _tryInstallFontFromFontName(fontName):
+    from drawBot.drawBotDrawingTools import _drawBotDrawingTool
+    return _drawBotDrawingTool._tryInstallFontFromFontName(fontName)
+
+
+class BezierContour(list):
+
+    """
+    A Bezier contour object.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super(BezierContour, self).__init__(*args, **kwargs)
+        self.open = True
+
+    def __repr__(self):
+        return "<BezierContour>"
+
+    def _get_clockwise(self):
+        from fontTools.pens.areaPen import AreaPen
+        pen = AreaPen()
+        pen.endPath = pen.closePath
+        self.drawToPen(pen)
+        return pen.value < 0
+
+    clockwise = property(_get_clockwise, doc="A boolean representing if the contour has a clockwise direction.")
+
+    def drawToPointPen(self, pointPen):
+        pointPen.beginPath()
+        for i, segment in enumerate(self):
+            if len(segment) == 1:
+                segmentType = "line"
+                if i == 0 and self.open:
+                    segmentType = "move"
+                pointPen.addPoint(segment[0], segmentType=segmentType)
+            else:
+                pointPen.addPoint(segment[0])
+                pointPen.addPoint(segment[1])
+                pointPen.addPoint(segment[2], segmentType="curve")
+        pointPen.endPath()
+
+    def drawToPen(self, pen):
+        for i, segment in enumerate(self):
+            if i == 0:
+                pen.moveTo(*segment)
+            elif len(segment) == 1:
+                pen.lineTo(*segment)
+            else:
+                pen.curveTo(*segment)
+        if self.open:
+            pen.endPath()
+        else:
+            pen.closePath()
+
+    def _get_points(self):
+        return [point for segment in self for point in segment]
+
+    points = property(_get_points, doc="Return a list of all the points making up this contour, regardless of whether they are on curve or off curve.")
+
+
+class BezierPath(BasePen):
 
     """
     A bezier path object, if you want to draw the same over and over again.
     """
 
-    def __init__(self, path=None):
+    contourClass = BezierContour
+
+    _instructionSegmentTypeMap = {
+        AppKit.NSMoveToBezierPathElement: "move",
+        AppKit.NSLineToBezierPathElement: "line",
+        AppKit.NSCurveToBezierPathElement: "curve"
+    }
+
+    def __init__(self, path=None, glyphSet=None):
         if path is None:
             self._path = AppKit.NSBezierPath.bezierPath()
         else:
             self._path = path
+        BasePen.__init__(self, glyphSet)
 
     def __repr__(self):
         return "<BezierPath>"
 
-    def moveTo(self, x, y=None):
+    # pen support
+
+    def _moveTo(self, pt):
         """
         Move to a point `x`, `y`.
         """
-        if y is None:
-            x, y = x
-        self._path.moveToPoint_((x, y))
+        self._path.moveToPoint_(pt)
 
-    moveto = moveTo
-
-    def lineTo(self, x, y=None):
+    def _lineTo(self, pt):
         """
         Line to a point `x`, `y`.
         """
-        if y is None:
-            x, y = x
-        self._path.lineToPoint_((x, y))
+        self._path.lineToPoint_(pt)
 
-    lineto = lineTo
-
-    def curveTo(self, x1, y1, x2, y2=None, x3=None, y3=None):
+    def _curveToOne(self, pt1, pt2, pt3):
         """
         Curve to a point `x3`, `y3`.
         With given bezier handles `x1`, `y1` and `x2`, `y2`.
         """
-        if y2 is None and x3 is None and y3 is None:
-            x3, y3 = x2
-            x2, y2 = y1
-            x1, y1 = x1
-        self._path.curveToPoint_controlPoint1_controlPoint2_((x3, y3), (x1, y1), (x2, y2))
-
-    curveto = curveTo
-
-    def arcTo(self, pt1, pt2, radius):
-        """
-        Arc from one point to an other point with a given `radius`.
-        """
-        self._path.appendBezierPathWithArcFromPoint_toPoint_radius_(pt1, pt2, radius)
+        self._path.curveToPoint_controlPoint1_controlPoint2_(pt3, pt1, pt2)
 
     def closePath(self):
         """
@@ -69,10 +129,61 @@ class BezierPath(object):
         """
         self._path.closePath()
 
-    closepath = closePath
+    def beginPath(self, identifier=None):
+        """
+        Begin path.
+        """
+        from ufoLib.pointPen import PointToSegmentPen
+        self._pointToSegmentPen = PointToSegmentPen(self)
+        self._pointToSegmentPen.beginPath()
+
+    def addPoint(self, *args, **kwargs):
+        """
+        Add a point to the path.
+        """
+        self._pointToSegmentPen.addPoint(*args, **kwargs)
 
     def endPath(self):
-        pass
+        """
+        End the path.
+
+        When the bezier path is used as a pen, the path will be open.
+
+        When the bezier path is used as a point pen, the path will process all the points added with `addPoints`.
+        """
+        if hasattr(self, "_pointToSegmentPen"):
+            # its been uses in a point pen world
+            self._pointToSegmentPen.endPath()
+            del self._pointToSegmentPen
+
+    def drawToPen(self, pen):
+        """
+        Draw the bezier path into a pen
+        """
+        contours = self.contours
+        for contour in contours:
+            contour.drawToPen(pen)
+
+    def drawToPointPen(self, pointPen):
+        """
+        Draw the bezier path into a point pen.
+        """
+        contours = self.contours
+        for contour in contours:
+            contour.drawToPointPen(pointPen)
+
+    def arc(self, center, radius, startAngle, endAngle, clockwise):
+        """
+        Arc with `center` and a given `radius`, from `startAngle` to `endAngle`, going clockwise if `clockwise` is True and counter clockwise if `clockwise` is False.
+        """
+        self._path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
+            center, radius, startAngle, endAngle, clockwise)
+
+    def arcTo(self, pt1, pt2, radius):
+        """
+        Arc from one point to an other point with a given `radius`.
+        """
+        self._path.appendBezierPathWithArcFromPoint_toPoint_radius_(pt1, pt2, radius)
 
     def rect(self, x, y, w, h):
         """
@@ -85,65 +196,106 @@ class BezierPath(object):
         Add a oval at possition `x`, `y` with a size of `w`, `h`
         """
         self._path.appendBezierPathWithOvalInRect_(((x, y), (w, h)))
+        self.closePath()
 
-    def text(self, txt, font=_FALLBACKFONT, fontSize=10, offset=None, box=None):
+    def text(self, txt, offset=None, font=_FALLBACKFONT, fontSize=10, align=None):
         """
         Draws a `txt` with a `font` and `fontSize` at an `offset` in the bezier path.
+        If a font path is given the font will be installed and used directly.
 
-        Optionally `txt` can be a `FormattedString` and be drawn inside a `box`, a tuple of (x, y, width, height).
+        Optionally an alignment can be set.
+        Possible `align` values are: `"left"`, `"center"` and `"right"`.
+
+        The default alignment is `left`.
+
+        Optionally `txt` can be a `FormattedString`.
         """
-        try:
-            txt = txt.decode("utf-8")
-        except:
-            pass
-        if isinstance(txt, FormattedString):
-            attributedString = txt.getNSObject()
-        else:
-            fontName = font
-            font = AppKit.NSFont.fontWithName_size_(font, fontSize)
-            if font is None:
-                warnings.warn("font: %s is not installed, back to the fallback font: %s" % (fontName, _FALLBACKFONT))
-                font = AppKit.NSFont.fontWithName_size_(_FALLBACKFONT, fontSize)
+        if align and align not in BaseContext._textAlignMap.keys():
+            raise DrawBotError("align must be %s" % (", ".join(BaseContext._textAlignMap.keys())))
+        context = BaseContext()
+        context.font(font, fontSize)
 
-            attributes = {
-                AppKit.NSFontAttributeName: font
-            }
-            attributedString = AppKit.NSAttributedString.alloc().initWithString_attributes_(txt, attributes)
+        attributedString = context.attributedString(txt, align)
         w, h = attributedString.size()
-        setter = CoreText.CTFramesetterCreateWithAttributedString(attributedString)
-        path = Quartz.CGPathCreateMutable()
         if offset:
             x, y = offset
         else:
             x = y = 0
-        if box:
-            bx, by, w, h = box
-            x += bx
-            y += by
-            Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(0, 0, w, h))
-        else:
-            Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(0, -h, w*2, h*2))
-        box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
-        ctLines = CoreText.CTFrameGetLines(box)
-        origins = CoreText.CTFrameGetLineOrigins(box, (0, len(ctLines)), None)
+        if align == "right":
+            x -= w
+        elif align == "center":
+            x -= w * .5
+        setter = CoreText.CTFramesetterCreateWithAttributedString(attributedString)
+        path = Quartz.CGPathCreateMutable()
+        Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(x, y, w, h))
+        frame = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
+        ctLines = CoreText.CTFrameGetLines(frame)
+        origins = CoreText.CTFrameGetLineOrigins(frame, (0, len(ctLines)), None)
+        if origins:
+            y -= origins[0][1]
+        self.textBox(txt, box=(x, y - h, w, h * 2), font=font, fontSize=fontSize, align=align)
 
-        if origins and box is not None:
-            x -= origins[-1][0]
-            y -= origins[-1][1]
+    def textBox(self, txt, box, font=_FALLBACKFONT, fontSize=10, align=None, hyphenation=None):
+        """
+        Draws a `txt` with a `font` and `fontSize` in a `box` in the bezier path.
+        If a font path is given the font will be installed and used directly.
+
+        Optionally an alignment can be set.
+        Possible `align` values are: `"left"`, `"center"` and `"right"`.
+
+        The default alignment is `left`.
+
+        Optionally `hyphenation` can be provided.
+
+        Optionally `txt` can be a `FormattedString`.
+        Optionally `box` can be a `BezierPath`.
+        """
+        if align and align not in BaseContext._textAlignMap.keys():
+            raise DrawBotError("align must be %s" % (", ".join(BaseContext._textAlignMap.keys())))
+        context = BaseContext()
+        context.font(font, fontSize)
+        context.hyphenation(hyphenation)
+
+        path, (x, y) = context._getPathForFrameSetter(box)
+        attributedString = context.attributedString(txt, align)
+
+        setter = CoreText.CTFramesetterCreateWithAttributedString(attributedString)
+        frame = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
+        ctLines = CoreText.CTFrameGetLines(frame)
+        origins = CoreText.CTFrameGetLineOrigins(frame, (0, len(ctLines)), None)
+
         for i, (originX, originY) in enumerate(origins):
             ctLine = ctLines[i]
             ctRuns = CoreText.CTLineGetGlyphRuns(ctLine)
             for ctRun in ctRuns:
                 attributes = CoreText.CTRunGetAttributes(ctRun)
                 font = attributes.get(AppKit.NSFontAttributeName)
+                baselineShift = attributes.get(AppKit.NSBaselineOffsetAttributeName, 0)
                 glyphCount = CoreText.CTRunGetGlyphCount(ctRun)
                 for i in range(glyphCount):
                     glyph = CoreText.CTRunGetGlyphs(ctRun, (i, 1), None)[0]
                     ax, ay = CoreText.CTRunGetPositions(ctRun, (i, 1), None)[0]
                     if glyph:
-                        self._path.moveToPoint_((x+originX+ax, y+originY+ay))
+                        self._path.moveToPoint_((x + originX + ax, y + originY + ay + baselineShift))
                         self._path.appendBezierPathWithGlyph_inFont_(glyph, font)
         self.optimizePath()
+        return context.clippedText(txt, box, align)
+
+    def traceImage(self, path, threshold=.2, blur=None, invert=False, turd=2, tolerance=0.2, offset=None):
+        """
+        Convert a given image to a vector outline.
+
+        Optionally some tracing options can be provide:
+
+        * `threshold`: the threshold used to bitmap an image
+        * `blur`: the image can be blurred
+        * `invert`: invert to the image
+        * `turd`: the size of small turd that can be ignored
+        * `tolerance`: the precision tolerance of the vector outline
+        * `offset`: add the traced vector outline with an offset to the BezierPath
+        """
+        from .tools import traceImage
+        traceImage.TraceImage(path, self, threshold, blur, invert, turd, tolerance, offset)
 
     def getNSBezierPath(self):
         """
@@ -151,16 +303,44 @@ class BezierPath(object):
         """
         return self._path
 
+    def _getCGPath(self):
+        path = Quartz.CGPathCreateMutable()
+        count = self._path.elementCount()
+        for i in range(count):
+            instruction, points = self._path.elementAtIndex_associatedPoints_(i)
+            if instruction == AppKit.NSMoveToBezierPathElement:
+                Quartz.CGPathMoveToPoint(path, None, points[0].x, points[0].y)
+            elif instruction == AppKit.NSLineToBezierPathElement:
+                Quartz.CGPathAddLineToPoint(path, None, points[0].x, points[0].y)
+            elif instruction == AppKit.NSCurveToBezierPathElement:
+                Quartz.CGPathAddCurveToPoint(
+                    path, None,
+                    points[0].x, points[0].y,
+                    points[1].x, points[1].y,
+                    points[2].x, points[2].y
+                )
+            elif instruction == AppKit.NSClosePathBezierPathElement:
+                Quartz.CGPathCloseSubpath(path)
+        # hacking to get a proper close path at the end of the path
+        x, y, _, _ = self.bounds()
+        Quartz.CGPathMoveToPoint(path, None, x, y)
+        Quartz.CGPathAddLineToPoint(path, None, x, y)
+        Quartz.CGPathAddLineToPoint(path, None, x, y)
+        Quartz.CGPathAddLineToPoint(path, None, x, y)
+        Quartz.CGPathCloseSubpath(path)
+        return path
+
     def setNSBezierPath(self, path):
         """
         Set a nsBezierPath.
         """
         self._path = path
 
-    def pointInside(self, (x, y)):
+    def pointInside(self, xy):
         """
         Check if a point `x`, `y` is inside a path.
         """
+        x, y = xy
         return self._path.containsPoint_((x, y))
 
     def bounds(self):
@@ -170,14 +350,234 @@ class BezierPath(object):
         if self._path.isEmpty():
             return None
         (x, y), (w, h) = self._path.bounds()
-        return x, y, x+w, y+h
+        return x, y, x + w, y + h
 
     def controlPointBounds(self):
         """
         Return the bounding box of the path including the offcurve points.
         """
         (x, y), (w, h) = self._path.controlPointBounds()
-        return x, y, x+w, y+h
+        return x, y, x + w, y + h
+
+    def optimizePath(self):
+        count = self._path.elementCount()
+        if self._path.elementAtIndex_(count - 1) == AppKit.NSMoveToBezierPathElement:
+            optimizedPath = AppKit.NSBezierPath.bezierPath()
+            for i in range(count - 1):
+                instruction, points = self._path.elementAtIndex_associatedPoints_(i)
+                if instruction == AppKit.NSMoveToBezierPathElement:
+                    optimizedPath.moveToPoint_(*points)
+                elif instruction == AppKit.NSLineToBezierPathElement:
+                    optimizedPath.lineToPoint_(*points)
+                elif instruction == AppKit.NSCurveToBezierPathElement:
+                    p1, p2, p3 = points
+                    optimizedPath.curveToPoint_controlPoint1_controlPoint2_(p3, p1, p2)
+                elif instruction == AppKit.NSClosePathBezierPathElement:
+                    optimizedPath.closePath()
+            self._path = optimizedPath
+
+    def copy(self):
+        """
+        Copy the bezier path.
+        """
+        new = self.__class__()
+        new._path = self._path.copy()
+        return new
+
+    def reverse(self):
+        """
+        Reverse the path direction
+        """
+        self._path = self._path.bezierPathByReversingPath()
+
+    def appendPath(self, otherPath):
+        """
+        Append a path.
+        """
+        self._path.appendBezierPath_(otherPath.getNSBezierPath())
+
+    def __add__(self, otherPath):
+        new = self.copy()
+        new.appendPath(otherPath)
+        return new
+
+    def __iadd__(self, other):
+        self.appendPath(other)
+        return self
+
+    # transformations
+
+    def translate(self, x=0, y=0):
+        """
+        Translate the path with a given offset.
+        """
+        self.transform((1, 0, 0, 1, x, y))
+
+    def rotate(self, angle, center=(0, 0)):
+        """
+        Rotate the path around the `center` point (which is the origin by default) with a given angle in degrees.
+        """
+        angle = math.radians(angle)
+        c = math.cos(angle)
+        s = math.sin(angle)
+        self.transform((c, s, -s, c, 0, 0), center)
+
+    def scale(self, x=1, y=None, center=(0, 0)):
+        """
+        Scale the path with a given `x` (horizontal scale) and `y` (vertical scale).
+
+        If only 1 argument is provided a proportional scale is applied.
+
+        The center of scaling can optionally be set via the `center` keyword argument. By default this is the origin.
+        """
+        if y is None:
+            y = x
+        self.transform((x, 0, 0, y, 0, 0), center)
+
+    def skew(self, angle1, angle2=0, center=(0, 0)):
+        """
+        Skew the path with given `angle1` and `angle2`.
+
+        If only one argument is provided a proportional skew is applied.
+
+        The center of skewing can optionally be set via the `center` keyword argument. By default this is the origin.
+        """
+        angle1 = math.radians(angle1)
+        angle2 = math.radians(angle2)
+        self.transform((1, math.tan(angle2), math.tan(angle1), 1, 0, 0), center)
+
+    def transform(self, transformMatrix, center=(0, 0)):
+        """
+        Transform a path with a transform matrix (xy, xx, yy, yx, x, y).
+        """
+        if center != (0, 0):
+            transformMatrix = transformationAtCenter(transformMatrix, center)
+        aT = AppKit.NSAffineTransform.transform()
+        aT.setTransformStruct_(transformMatrix[:])
+        self._path.transformUsingAffineTransform_(aT)
+
+    # boolean operations
+
+    def _contoursForBooleanOperations(self):
+        # contours are very temporaly objects
+        # redirect drawToPointPen to drawPoints
+        contours = self.contours
+        for contour in contours:
+            contour.drawPoints = contour.drawToPointPen
+            if contour.open:
+                raise DrawBotError("open contours are not supported during boolean operations")
+        return contours
+
+    def union(self, other):
+        """
+        Return the union between two bezier paths.
+        """
+        assert isinstance(other, self.__class__)
+        import booleanOperations
+        contours = self._contoursForBooleanOperations() + other._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.union(contours, result)
+        return result
+
+    def removeOverlap(self):
+        """
+        Remove all overlaps in a bezier path.
+        """
+        import booleanOperations
+        contours = self._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.union(contours, result)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def difference(self, other):
+        """
+        Return the difference between two bezier paths.
+        """
+        assert isinstance(other, self.__class__)
+        import booleanOperations
+        subjectContours = self._contoursForBooleanOperations()
+        clipContours = other._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.difference(subjectContours, clipContours, result)
+        return result
+
+    def intersection(self, other):
+        """
+        Return the intersection between two bezier paths.
+        """
+        assert isinstance(other, self.__class__)
+        import booleanOperations
+        subjectContours = self._contoursForBooleanOperations()
+        clipContours = other._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.intersection(subjectContours, clipContours, result)
+        return result
+
+    def xor(self, other):
+        """
+        Return the xor between two bezier paths.
+        """
+        assert isinstance(other, self.__class__)
+        import booleanOperations
+        subjectContours = self._contoursForBooleanOperations()
+        clipContours = other._contoursForBooleanOperations()
+        result = self.__class__()
+        booleanOperations.xor(subjectContours, clipContours, result)
+        return result
+
+    def intersectionPoints(self, other=None):
+        """
+        Return a list of intersection points as `x`, `y` tuples.
+
+        Optionaly provide an other path object to find intersection points.
+        """
+        import booleanOperations
+        contours = self._contoursForBooleanOperations()
+        if other is not None:
+            assert isinstance(other, self.__class__)
+            contours += other._contoursForBooleanOperations()
+        return booleanOperations.getIntersections(contours)
+
+    def __mod__(self, other):
+        return self.difference(other)
+
+    __rmod__ = __mod__
+
+    def __imod__(self, other):
+        result = self.difference(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def __or__(self, other):
+        return self.union(other)
+
+    __ror__ = __or__
+
+    def __ior__(self, other):
+        result = self.union(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def __and__(self, other):
+        return self.intersection(other)
+
+    __rand__ = __and__
+
+    def __iand__(self, other):
+        result = self.intersection(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
+
+    def __xor__(self, other):
+        return self.xor(other)
+
+    __rxor__ = __xor__
+
+    def __ixor__(self, other):
+        result = self.xor(other)
+        self.setNSBezierPath(result.getNSBezierPath())
+        return self
 
     def _points(self, onCurve=True, offCurve=True):
         points = []
@@ -211,40 +611,32 @@ class BezierPath(object):
         contours = []
         for index in range(self._path.elementCount()):
             instruction, pts = self._path.elementAtIndex_associatedPoints_(index)
-            if instruction == 0:
-                contours.append([])
+            if instruction == AppKit.NSMoveToBezierPathElement:
+                contours.append(self.contourClass())
+            if instruction == AppKit.NSClosePathBezierPathElement:
+                contours[-1].open = False
             if pts:
                 contours[-1].append([(p.x, p.y) for p in pts])
         if len(contours) >= 2 and len(contours[-1]) == 1 and contours[-1][0] == contours[-2][0]:
             contours.pop()
         return contours
 
-    contours = property(_get_contours, doc="Return a list of contours with all point coordinates sorted in segments.")
+    contours = property(_get_contours, doc="Return a list of contours with all point coordinates sorted in segments. A contour object has an `open` attribute.")
 
-    def optimizePath(self):
-        count = self._path.elementCount()
-        if self._path.elementAtIndex_(count-1) == AppKit.NSMoveToBezierPathElement:
-            optimizedPath = AppKit.NSBezierPath.bezierPath()
-            for i in range(count-1):
-                instruction, points = self._path.elementAtIndex_associatedPoints_(i)
-                if instruction == AppKit.NSMoveToBezierPathElement:
-                    optimizedPath.moveToPoint_(*points)
-                elif instruction == AppKit.NSLineToBezierPathElement:
-                    optimizedPath.lineToPoint_(*points)
-                elif instruction == AppKit.NSCurveToBezierPathElement:
-                    p1, p2, p3 = points
-                    optimizedPath.curveToPoint_controlPoint1_controlPoint2_(p3, p1, p2)
-                elif instruction == AppKit.NSClosePathBezierPathElement:
-                    optimizedPath.closePath()
-            self._path = optimizedPath
+    def __len__(self):
+        return len(self.contours)
 
-    def copy(self):
-        """
-        Copy the bezier path.
-        """
-        new = self.__class__()
-        new._path = self._path.copy()
-        return new
+    def __getitem__(self, index):
+        return self.contours[index]
+
+    def __iter__(self):
+        contours = self.contours
+        count = len(contours)
+        index = 0
+        while index < count:
+            contour = contours[index]
+            yield contour
+            index += 1
 
 
 class Color(object):
@@ -252,6 +644,7 @@ class Color(object):
     colorSpace = AppKit.NSColorSpace.genericRGBColorSpace
 
     def __init__(self, r=None, g=None, b=None, a=1):
+        self._color = None
         if r is None:
             return
         if isinstance(r, AppKit.NSColor):
@@ -279,25 +672,27 @@ class Color(object):
         return new
 
     @classmethod
-    def getColorsFromList(self, inputColors):
+    def getColorsFromList(cls, inputColors):
         outputColors = []
         for color in inputColors:
-            color = self.getColor(color)
+            color = cls.getColor(color)
             outputColors.append(color)
         return outputColors
 
     @classmethod
-    def getColor(self, color):
-        if isinstance(color, (tuple, list)):
-            return self(*color)
+    def getColor(cls, color):
+        if isinstance(color, cls.__class__):
+            return color
+        elif isinstance(color, (tuple, list)):
+            return cls(*color)
         elif isinstance(color, AppKit.NSColor):
-            return self(color)
+            return cls(color)
         raise DrawBotError("Not a valid color: %s" % color)
 
 
 class CMYKColor(Color):
 
-    colorSpace = AppKit.NSColorSpace.genericCMYKColorSpace()
+    colorSpace = AppKit.NSColorSpace.genericCMYKColorSpace
 
     def __init__(self, c=None, m=None, y=None, k=None, a=1):
         if c is None:
@@ -306,7 +701,8 @@ class CMYKColor(Color):
             self._color = c
         else:
             self._color = AppKit.NSColor.colorWithDeviceCyan_magenta_yellow_black_alpha_(c, m, y, k, a)
-        self._color = self._color.colorUsingColorSpace_(self.colorSpace)
+        self._color = self._color.colorUsingColorSpace_(self.colorSpace())
+        self._cmyka = c, m, y, k, a
 
 
 class Shadow(object):
@@ -340,11 +736,11 @@ class Gradient(object):
         if gradientType is None:
             return
         if gradientType not in ("linear", "radial"):
-            raise DrawBotError("Gradient type must be either line or circle")
+            raise DrawBotError("Gradient type must be either 'linear' or 'radial'")
         if not colors or len(colors) < 2:
             raise DrawBotError("Gradient needs at least 2 colors")
         if positions is None:
-            positions = [i / float(len(colors)-1) for i in range(len(colors))]
+            positions = [i / float(len(colors) - 1) for i in range(len(colors))]
         if len(colors) != len(positions):
             raise DrawBotError("Gradient needs a correct position for each color")
         self.gradientType = gradientType
@@ -373,6 +769,11 @@ class Gradient(object):
 
 class FormattedString(object):
 
+    """
+    FormattedString is a reusable object, if you want to draw the same over and over again.
+    FormattedString objects can be drawn with the `text(txt, (x, y))` and `textBox(txt, (x, y, w, h))` methods.
+    """
+
     _colorClass = Color
     _cmykColorClass = CMYKColor
 
@@ -381,51 +782,132 @@ class FormattedString(object):
         left=AppKit.NSLeftTextAlignment,
         right=AppKit.NSRightTextAlignment,
         justified=AppKit.NSJustifiedTextAlignment,
-        )
+    )
 
-    """
-    A formatted string object, if you want to draw the same over and over again.
-    FormattedString objects can be drawn with the `text(txt, (x, y))` and `textBox(txt, (x, y, w, h))` methods.
-    """
+    _textTabAlignMap = dict(
+        center=AppKit.NSCenterTextAlignment,
+        left=AppKit.NSLeftTextAlignment,
+        right=AppKit.NSRightTextAlignment,
+    )
 
-    def __init__(self, txt=None,
-                        font=None, fontSize=10, fallbackFont=None,
-                        fill=(0, 0, 0), cmykFill=None,
-                        stroke=None, cmykStroke=None, strokeWidth=1,
-                        align=None, lineHeight=None, tracking=None,
-                        openTypeFeatures=None):
-        self._attributedString = AppKit.NSMutableAttributedString.alloc().init()
-        self._font = font
-        self._fontSize = fontSize
-        self._fill = fill
-        self._cmykFill = cmykFill
-        self._stroke = stroke
-        self._cmykStroke = cmykStroke
-        self._strokeWidth = strokeWidth
-        self._align = align
-        self._lineHeight = lineHeight
-        self._tracking = tracking
-        self._fallbackFont = fallbackFont
-        if openTypeFeatures is None:
-            openTypeFeatures = dict()
-        self._openTypeFeatures = openTypeFeatures
+    _textUnderlineMap = dict(
+        single=AppKit.NSUnderlineStyleSingle,
+        # thick=AppKit.NSUnderlineStyleThick,
+        # double=AppKit.NSUnderlineStyleDouble,
+        # solid=AppKit.NSUnderlinePatternSolid,
+        # dotted=AppKit.NSUnderlinePatternDot,
+        # dashed=AppKit.NSUnderlinePatternDash,
+        # dotDashed=AppKit.NSUnderlinePatternDashDot,
+        # dotDotted=AppKit.NSUnderlinePatternDashDotDot,
+        # byWord=0x8000 # AppKit.NSUnderlineByWord,
+    )
+
+    _formattedAttributes = dict(
+        font=_FALLBACKFONT,
+        fallbackFont=None,
+        fontSize=10,
+
+        fill=(0, 0, 0),
+        cmykFill=None,
+        stroke=None,
+        cmykStroke=None,
+        strokeWidth=1,
+
+        align=None,
+        lineHeight=None,
+        tracking=None,
+        baselineShift=None,
+        underline=None,
+        openTypeFeatures=dict(),
+        fontVariations=dict(),
+        tabs=None,
+        indent=None,
+        tailIndent=None,
+        firstLineIndent=None,
+        paragraphTopSpacing=None,
+        paragraphBottomSpacing=None,
+
+        language=None,
+    )
+
+    def __init__(self, txt=None, **kwargs):
+        self.clear()
+        # create all _<attributes> in the formatted text object
+        # with default values
+        for key, value in self._formattedAttributes.items():
+            if isinstance(value, dict):
+                value = dict(value)
+            if isinstance(value, list):
+                value = list(value)
+            setattr(self, "_%s" % key, value)
+        attributes = self._validateAttributes(kwargs, addDefaults=False)
         if txt:
-            self.append(txt, font=font, fontSize=fontSize, fallbackFont=fallbackFont,
-                        fill=fill, cmykFill=cmykFill,
-                        stroke=stroke, cmykStroke=cmykStroke, strokeWidth=strokeWidth,
-                        align=align, lineHeight=lineHeight,
-                        openTypeFeatures=openTypeFeatures)
+            self.append(txt, **attributes)
+        else:
+            # call each method with the provided value
+            for key, value in attributes.items():
+                self._setAttribute(key, value)
+            self._setColorAttributes(attributes)
 
-    def append(self, txt,
-                    font=None, fallbackFont=None, fontSize=None,
-                    fill=None, cmykFill=None,
-                    stroke=None, cmykStroke=None, strokeWidth=None,
-                    align=None, lineHeight=None, tracking=None,
-                    openTypeFeatures=None):
+    def _setAttribute(self, attribute, value):
+        method = getattr(self, attribute)
+        if isinstance(value, (list, tuple)):
+            method(*value)
+        elif isinstance(value, dict):
+            method(**value)
+        else:
+            method(value)
+
+    def _setColorAttributes(self, attributes):
+        colorAttributeNames = ("fill", "stroke", "cmykFill", "cmykStroke")
+        for key in colorAttributeNames:
+            value = attributes.get(key)
+            if value is not None:
+                setattr(self, "_%s" % key, value)
+
+        if self._fill is not None:
+            try:
+                len(self._fill)
+            except Exception:
+                self._fill = (self._fill,)
+        if self._stroke is not None:
+            try:
+                len(self._stroke)
+            except Exception:
+                self._stroke = (self._stroke,)
+        if self._fill:
+            self._cmykFill = None
+        elif self._cmykFill:
+            self._fill = None
+
+        if self._stroke:
+            self._cmykStroke = None
+        elif self._cmykStroke:
+            self._stroke = None
+
+    def _validateAttributes(self, attributes, addDefaults=True):
+        for attribute in attributes:
+            if attribute not in self._formattedAttributes:
+                raise TypeError("FormattedString got an unexpected keyword argument '%s'" % attribute)
+        result = dict()
+        if addDefaults:
+            for key, value in self._formattedAttributes.items():
+                if isinstance(value, dict):
+                    value = dict(value)
+                elif isinstance(value, list):
+                    value = list(value)
+                result[key] = value
+        result.update(attributes)
+        return result
+
+    def clear(self):
+        self._attributedString = AppKit.NSMutableAttributedString.alloc().init()
+
+    def append(self, txt, **kwargs):
         """
         Add `txt` to the formatted string with some additional text formatting attributes:
 
-        * `font`: the font to be used for the given text
+        * `font`: the font to be used for the given text, if a font path is given the font will be installed and used directly.
         * `fallbackFont`: the fallback font
         * `fontSize`: the font size to be used for the given text
         * `fill`: the fill color to be used for the given text
@@ -435,174 +917,210 @@ class FormattedString(object):
         * `strokeWidth`: the strokeWidth to be used for the given text
         * `align`: the alignment to be used for the given text
         * `lineHeight`: the lineHeight to be used for the given text
+        * `tracking`: set tracking for the given text
+        * `baselineShift`: set base line shift for the given text
         * `openTypeFeatures`: enable OpenType features
+        * `fontVariations`: pick a variation by axes values
+        * `tabs`: enable tabs
+        * `indent`: the indent of a paragraph
+        * `tailIndent`: the tail indent of a paragraph
+        * `firstLineIndent`: the first line indent of a paragraph
+        * `paragraphTopSpacing`: the spacing at the top of a paragraph
+        * `paragraphBottomSpacing`: the spacing at the bottom of a paragraph
+        * `language`: the language of the text
 
         All formatting attributes follow the same notation as other similar DrawBot methods.
         A color is a tuple of `(r, g, b, alpha)`, and a cmykColor is a tuple of `(c, m, y, k, alpha)`.
 
         Text can also be added with `formattedString += "hello"`. It will append the text with the current settings of the formatted string.
         """
-        try:
-            txt = txt.decode("utf-8")
-        except:
-            pass
-        if font is None:
-            font = self._font
-        else:
-            self._font = font
-
-        if fallbackFont is None:
-            fallbackFont = self._fallbackFont
-        else:
-            self._fallbackFont = fallbackFont
-
-        if fontSize is None:
-            fontSize = self._fontSize
-        else:
-            self._fontSize = fontSize
-
-        if fill is None and cmykFill is None:
-            fill = self._fill
-            cmykFill = self._cmykFill
-        elif fill is not None:
-            self._fill = fill
-            self._cmykFill = None
-        elif cmykFill is not None:
-            self._cmykFill = cmykFill
-            self._fill = None
-
-        if stroke is None and cmykStroke is None:
-            stroke = self._stroke
-            cmykStroke = self._cmykStroke
-        elif stroke is not None:
-            self._stroke = stroke
-            self._cmykStroke = None
-        elif cmykStroke is not None:
-            self._cmykStroke = cmykStroke
-            self._stroke = None
-
-        if strokeWidth is None:
-            strokeWidth = self._strokeWidth
-        else:
-            self._strokeWidth = strokeWidth
-
-        if align is None:
-            align = self._align
-        else:
-            self._align = align
-
-        if lineHeight is None:
-            lineHeight = self._lineHeight
-        else:
-            self._lineHeight = lineHeight
-
-        if tracking is None:
-            tracking = self._tracking
-        else:
-            self._tracking = tracking
-
-        if openTypeFeatures is None:
-            openTypeFeatures = self._openTypeFeatures
-        else:
-            self._openTypeFeatures = openTypeFeatures
+        if PY2 and isinstance(txt, basestring):
+            try:
+                txt = txt.decode("utf-8")
+            except UnicodeEncodeError:
+                pass
+        attributes = self._validateAttributes(kwargs, addDefaults=False)
+        for key, value in attributes.items():
+            self._setAttribute(key, value)
+        self._setColorAttributes(attributes)
 
         if isinstance(txt, FormattedString):
             self._attributedString.appendAttributedString_(txt.getNSObject())
             return
         attributes = {}
-        if font:
-            fontName = font
-            font = AppKit.NSFont.fontWithName_size_(fontName, fontSize)
+        if self._font:
+            font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
             if font is None:
-                ff = fallbackFont
+                ff = self._fallbackFont
                 if ff is None:
                     ff = _FALLBACKFONT
-                warnings.warn("font: %s is not installed, back to the fallback font: %s" % (fontName, ff))
-                font = AppKit.NSFont.fontWithName_size_(ff, fontSize)
+                warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
+                font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
             coreTextfeatures = []
-            for featureTag, value in openTypeFeatures.items():
-                if not value:
-                    featureTag = "%s_off" % featureTag
-                if featureTag in openType.featureMap:
-                    feature = openType.featureMap[featureTag]
-                    coreTextfeatures.append(feature)
+            if self._openTypeFeatures:
+                existingOpenTypeFeatures = openType.getFeatureTagsForFontName(self._font)
+                # sort features by their on/off state
+                # set all disabled features first
+                orderedOpenTypeFeatures = sorted(self._openTypeFeatures.items(), key=lambda kv: kv[1])
+                for featureTag, value in orderedOpenTypeFeatures:
+                    coreTextFeatureTag = featureTag
+                    if not value:
+                        coreTextFeatureTag = "%s_off" % featureTag
+                    if coreTextFeatureTag in openType.featureMap:
+                        if value and featureTag not in existingOpenTypeFeatures:
+                            # only warn when the feature is on and not existing for the current font
+                            warnings.warn("OpenType feature '%s' not available for '%s'" % (featureTag, self._font))
+                        feature = openType.featureMap[coreTextFeatureTag]
+                        coreTextfeatures.append(feature)
+                    else:
+                        warnings.warn("OpenType feature '%s' not available" % (featureTag))
+            coreTextFontVariations = dict()
+            if self._fontVariations:
+                existingAxes = variation.getVariationAxesForFontName(self._font)
+                for axis, value in self._fontVariations.items():
+                    if axis in existingAxes:
+                        existinsAxis = existingAxes[axis]
+                        # clip variation value within the min max value
+                        if value < existinsAxis["minValue"]:
+                            value = existinsAxis["minValue"]
+                        if value > existinsAxis["maxValue"]:
+                            value = existinsAxis["maxValue"]
+                        coreTextFontVariations[variation.convertVariationTagToInt(axis)] = value
+                    else:
+                        warnings.warn("variation axis '%s' not available for '%s'" % (axis, self._font))
+            fontAttributes = {}
+            if coreTextfeatures:
+                fontAttributes[CoreText.NSFontFeatureSettingsAttribute] = coreTextfeatures
+            if coreTextFontVariations:
+                fontAttributes[CoreText.NSFontVariationAttribute] = coreTextFontVariations
+            if self._fallbackFont:
+                fontAttributes[CoreText.NSFontCascadeListAttribute] = [AppKit.NSFontDescriptor.fontDescriptorWithName_size_(self._fallbackFont, self._fontSize)]
             fontDescriptor = font.fontDescriptor()
-            fontAttributes = {
-                CoreText.NSFontFeatureSettingsAttribute: coreTextfeatures,
-                }
-            if fallbackFont:
-                fontAttributes[CoreText.NSFontCascadeListAttribute] = [AppKit.NSFontDescriptor.fontDescriptorWithName_size_(fallbackFont, fontSize)]
             fontDescriptor = fontDescriptor.fontDescriptorByAddingAttributes_(fontAttributes)
-            font = AppKit.NSFont.fontWithDescriptor_size_(fontDescriptor, fontSize)
+            font = AppKit.NSFont.fontWithDescriptor_size_(fontDescriptor, self._fontSize)
             attributes[AppKit.NSFontAttributeName] = font
-        elif fontSize:
-            font = AppKit.NSFont.fontWithName_size_(_FALLBACKFONT, fontSize)
+        elif self._fontSize:
+            font = AppKit.NSFont.fontWithName_size_(_FALLBACKFONT, self._fontSize)
             attributes[AppKit.NSFontAttributeName] = font
-        if fill or cmykFill:
-            if fill:
-                fillColor = self._colorClass.getColor(fill).getNSObject()
-            elif cmykFill:
-                fillColor = self._cmykColorClass.getColor(cmykFill).getNSObject()
+        if self._fill or self._cmykFill:
+            if self._fill:
+                fillColor = self._colorClass.getColor(self._fill).getNSObject()
+            elif self._cmykFill:
+                fillColor = self._cmykColorClass.getColor(self._cmykFill).getNSObject()
             attributes[AppKit.NSForegroundColorAttributeName] = fillColor
-        if stroke or cmykStroke:
-            if stroke:
-                strokeColor = self._colorClass.getColor(stroke).getNSObject()
-            elif cmykStroke:
-                strokeColor = self._cmykColorClass.getColor(cmykStroke).getNSObject()
+        else:
+            # seems like the default foreground color is black
+            # set clear color when the fill is None
+            attributes[AppKit.NSForegroundColorAttributeName] = AppKit.NSColor.clearColor()
+        if self._stroke or self._cmykStroke:
+            if self._stroke:
+                strokeColor = self._colorClass.getColor(self._stroke).getNSObject()
+            elif self._cmykStroke:
+                strokeColor = self._cmykColorClass.getColor(self._cmykStroke).getNSObject()
             attributes[AppKit.NSStrokeColorAttributeName] = strokeColor
-            attributes[AppKit.NSStrokeWidthAttributeName] = -abs(strokeWidth)
+            # stroke width must be negative
+            # Supply a negative value for NSStrokeWidthAttributeName
+            # when you wish to draw a string that is both filled and stroked.
+            # see https://developer.apple.com/library/content/qa/qa1531/_index.html
+            attributes[AppKit.NSStrokeWidthAttributeName] = -abs(self._strokeWidth)
         para = AppKit.NSMutableParagraphStyle.alloc().init()
-        if align:
-            para.setAlignment_(self._textAlignMap[align])
-        if lineHeight:
-            # para.setLineSpacing_(lineHeight)
-            para.setMaximumLineHeight_(lineHeight)
-            para.setMinimumLineHeight_(lineHeight)
-        if tracking:
-            attributes[AppKit.NSKernAttributeName] = tracking
+        if self._align:
+            para.setAlignment_(self._textAlignMap[self._align])
+        if self._tabs:
+            for tabStop in para.tabStops():
+                para.removeTabStop_(tabStop)
+            for tab, tabAlign in self._tabs:
+                tabOptions = None
+                if tabAlign in self._textTabAlignMap:
+                    tabAlign = self._textTabAlignMap[tabAlign]
+                else:
+                    tabCharSet = AppKit.NSCharacterSet.characterSetWithCharactersInString_(tabAlign)
+                    tabOptions = {AppKit.NSTabColumnTerminatorsAttributeName: tabCharSet}
+                    tabAlign = self._textAlignMap["right"]
+                tabStop = AppKit.NSTextTab.alloc().initWithTextAlignment_location_options_(tabAlign, tab, tabOptions)
+                para.addTabStop_(tabStop)
+        if self._lineHeight is not None:
+            # para.setLineSpacing_(0.0)
+            # para.setLineHeightMultiple_(1)
+            para.setMinimumLineHeight_(self._lineHeight)
+            para.setMaximumLineHeight_(self._lineHeight)
+
+        if self._indent is not None:
+            para.setHeadIndent_(self._indent)
+            para.setFirstLineHeadIndent_(self._indent)
+        if self._tailIndent is not None:
+            para.setTailIndent_(self._tailIndent)
+        if self._firstLineIndent is not None:
+            para.setFirstLineHeadIndent_(self._firstLineIndent)
+
+        if self._paragraphTopSpacing is not None:
+            para.setParagraphSpacingBefore_(self._paragraphTopSpacing)
+        if self._paragraphBottomSpacing is not None:
+            para.setParagraphSpacing_(self._paragraphBottomSpacing)
+
+        if self._tracking:
+            attributes[AppKit.NSKernAttributeName] = self._tracking
+        if self._baselineShift is not None:
+            attributes[AppKit.NSBaselineOffsetAttributeName] = self._baselineShift
+        if self._underline in self._textUnderlineMap:
+            attributes[AppKit.NSUnderlineStyleAttributeName] = self._textUnderlineMap[self._underline]
+        if self._language:
+            attributes["NSLanguage"] = self._language
         attributes[AppKit.NSParagraphStyleAttributeName] = para
         txt = AppKit.NSAttributedString.alloc().initWithString_attributes_(txt, attributes)
         self._attributedString.appendAttributedString_(txt)
 
     def __add__(self, txt):
         new = self.copy()
-        new.append(txt,
-                    font=self._font, fallbackFont=self._fallbackFont, fontSize=self._fontSize,
-                    fill=self._fill, cmykFill=self._cmykFill,
-                    stroke=self._stroke, cmykStroke=self._cmykStroke, strokeWidth=self._strokeWidth,
-                    align=self._align, lineHeight=self._lineHeight, tracking=self._tracking, openTypeFeatures=self._openTypeFeatures)
+        if isinstance(txt, self.__class__):
+            new.getNSObject().appendAttributedString_(txt.getNSObject())
+        else:
+            if not isinstance(txt, basestring):
+                raise TypeError("FormattedString requires a str or unicode, got '%s'" % type(txt))
+            new.append(txt)
         return new
 
     def __getitem__(self, index):
         if isinstance(index, slice):
             start = index.start
             stop = index.stop
-            textLenght = len(self)
+            textLength = len(self)
 
             if start is None:
                 start = 0
             elif start < 0:
-                start = textLenght + start
-            elif start > textLenght:
-                start = textLenght
+                start = textLength + start
+            elif start > textLength:
+                start = textLength
 
             if stop is None:
-                stop = textLenght
+                stop = textLength
             elif stop < 0:
-                stop = textLenght + stop
+                stop = textLength + stop
 
-            if start + (stop-start) > textLenght:
-                stop = textLenght - stop
+            if start + (stop - start) > textLength:
+                stop = textLength
 
-            rng = (start, stop-start)
-            new = self.__class__()
+            location = start
+            length = stop - start
+
+            if location < 0:
+                location = 0
+            if length > textLength:
+                length = textLength
+            elif length < 0:
+                length = 0
+
+            rng = location, length
+            attributes = {key: getattr(self, "_%s" % key) for key in self._formattedAttributes}
+            new = self.__class__(**attributes)
             try:
                 new._attributedString = self._attributedString.attributedSubstringFromRange_(rng)
-            except:
+            except Exception:
                 pass
             return new
         else:
-            text = str(self)
+            text = self._attributedString.string()
             return text[index]
 
     def __len__(self):
@@ -614,27 +1132,36 @@ class FormattedString(object):
     def font(self, font, fontSize=None):
         """
         Set a font with the name of the font.
+        If a font path is given the font will be installed and used directly.
         Optionally a `fontSize` can be set directly.
         The default font, also used as fallback font, is 'LucidaGrande'.
         The default `fontSize` is 10pt.
 
         The name of the font relates to the font's postscript name.
+
+        The font name is returned, which is handy when the font was loaded
+        from a path.
         """
-        font = font.encode("ascii", "ignore")
+        font = _tryInstallFontFromFontName(font)
+        font = str(font)
         self._font = font
         if fontSize is not None:
             self._fontSize = fontSize
+        return font
 
     def fallbackFont(self, font):
         """
         Set a fallback font, used whenever a glyph is not available in the normal font.
+        If a font path is given the font will be installed and used directly.
         """
         if font:
-            font = font.encode("ascii", "ignore")
+            font = _tryInstallFontFromFontName(font)
+            font = str(font)
             testFont = AppKit.NSFont.fontWithName_size_(font, self._fontSize)
             if testFont is None:
                 raise DrawBotError("Fallback font '%s' is not available" % font)
         self._fallbackFont = font
+        return font
 
     def fontSize(self, fontSize):
         """
@@ -648,6 +1175,8 @@ class FormattedString(object):
         Sets the fill color with a `red`, `green`, `blue` and `alpha` value.
         Each argument must a value float between 0 and 1.
         """
+        if fill and fill[0] is None:
+            fill = None
         self._fill = fill
         self._cmykFill = None
 
@@ -656,6 +1185,8 @@ class FormattedString(object):
         Sets the stroke color with a `red`, `green`, `blue` and `alpha` value.
         Each argument must a value float between 0 and 1.
         """
+        if stroke and stroke[0] is None:
+            stroke = None
         self._stroke = stroke
         self._cmykStroke = None
 
@@ -665,6 +1196,8 @@ class FormattedString(object):
 
         Sets the CMYK fill color. Each value must be a float between 0.0 and 1.0.
         """
+        if cmykFill and cmykFill[0] is None:
+            cmykFill = None
         self._cmykFill = cmykFill
         self._fill = None
 
@@ -674,6 +1207,8 @@ class FormattedString(object):
 
         Sets the CMYK stroke color. Each value must be a float between 0.0 and 1.0.
         """
+        if cmykStroke and cmykStroke[0] is None:
+            cmykStroke = None
         self._cmykStroke = cmykStroke
         self._stroke = None
 
@@ -702,11 +1237,42 @@ class FormattedString(object):
         """
         self._tracking = tracking
 
+    def baselineShift(self, baselineShift):
+        """
+        Set the shift of the baseline.
+        """
+        self._baselineShift = baselineShift
+
+    def underline(self, underline):
+        """
+        Set the underline value.
+        Underline must be `single` or `None`.
+        """
+        self._underline = underline
+
     def openTypeFeatures(self, *args, **features):
         """
         Enable OpenType features.
+
+        .. downloadcode:: openTypeFeaturesFormattedString.py
+
+            size(1000, 200)
+            # create an empty formatted string object
+            t = FormattedString()
+            # set a font
+            t.font("ACaslonPro-Regular")
+            # set a font size
+            t.fontSize(60)
+            # add some text
+            t += "0123456789 Hello"
+            # enable some open type features
+            t.openTypeFeatures(smcp=True, lnum=True)
+            # add some text
+            t += " 0123456789 Hello"
+            # draw the formatted string
+            text(t, (10, 80))
         """
-        if args and args[0] == None:
+        if args and args[0] is None:
             self._openTypeFeatures.clear()
         else:
             self._openTypeFeatures.update(features)
@@ -715,11 +1281,159 @@ class FormattedString(object):
         """
         List all OpenType feature tags for the current font.
 
-        Optionally a `fontName` can be given.
+        Optionally a `fontName` can be given. If a font path is given the font will be installed and used directly.
         """
-        if fontName is None:
+        if fontName:
+            fontName = _tryInstallFontFromFontName(fontName)
+        else:
             fontName = self._font
         return openType.getFeatureTagsForFontName(fontName)
+
+    def fontVariations(self, *args, **axes):
+        """
+        Pick a variation by axes values.
+        """
+        if args and args[0] is None:
+            self._fontVariations.clear()
+        else:
+            self._fontVariations.update(axes)
+
+    def listFontVariations(self, fontName=None):
+        """
+        List all variation axes for the current font.
+
+        Optionally a `fontName` can be given. If a font path is given the font will be installed and used directly.
+        """
+        if fontName:
+            fontName = _tryInstallFontFromFontName(fontName)
+        else:
+            fontName = self._font
+        return variation.getVariationAxesForFontName(fontName)
+
+    def tabs(self, *tabs):
+        """
+        Set tabs,tuples of (`float`, `alignment`)
+        Aligment can be `"left"`, `"center"`, `"right"` or any other character.
+        If a character is provided the alignment will be `right` and centered on the specified character.
+
+        .. downloadcode:: tabsFormattedString.py
+
+            # create a new formatted string
+            t = FormattedString()
+            # set some tabs
+            t.tabs((85, "center"), (232, "right"), (300, "left"))
+            # add text with tabs
+            t += " hello w o r l d".replace(" ", "\\t")
+            # draw the string
+            text(t, (10, 10))
+        """
+        if tabs and tabs[0] is None:
+            self._tabs = None
+        else:
+            self._tabs = tabs
+
+    def indent(self, indent):
+        """
+        Set indent of text left of the paragraph.
+
+        .. downloadcode:: indent.py
+
+            # setting up some variables
+            x, y, w, h = 10, 10, 500, 600
+
+            txtIndent = 100
+            txtFirstLineIndent = 200
+            txtTailIndent = -100
+            txtFontSize = 22
+
+            paragraphTop = 3
+            paragraphBottom = 10
+
+            txt = '''DrawBot is an ideal tool to teach the basics of programming. Students get colorful graphic treats while getting familiar with variables, conditional statements, functions and what have you. Results can be saved in a selection of different file formats, including as high resolution, scaleable PDF, svg, movie, png, jpeg, tiff...'''
+
+            # a new page with preset size
+            newPage(w+x*2, h+y*2)
+            # draw text indent line
+            stroke(1, 0, 0)
+            line((x+txtIndent, y), (x+txtIndent, y+h))
+            # draw text firstline indent line
+            stroke(1, 1, 0)
+            line((x+txtFirstLineIndent, y), (x+txtFirstLineIndent, y+h))
+            # draw tail indent
+            pos = txtTailIndent
+            # tail indent could be negative
+            if pos <= 0:
+                # substract from width of the text box
+                pos = w + pos
+            stroke(0, 0, 1)
+            line((x+pos, y), (x+pos, y+h))
+            # draw a rectangle
+            fill(0, .1)
+            stroke(None)
+            rect(x, y, w, h)
+
+            # create a formatted string
+            t = FormattedString(fontSize=txtFontSize)
+            # set alignment
+            t.align("justified")
+            # add text
+            t += txt
+            # add hard return
+            t += "\\n"
+            # set style for indented text
+            t.fontSize(txtFontSize*.6)
+            t.paragraphTopSpacing(paragraphTop)
+            t.paragraphBottomSpacing(paragraphBottom)
+            t.firstLineIndent(txtFirstLineIndent)
+            t.indent(txtIndent)
+            t.tailIndent(txtTailIndent)
+            # add text
+            t += txt
+            # add hard return
+            t += "\\n"
+            # reset style
+            t.fontSize(txtFontSize)
+            t.indent(None)
+            t.tailIndent(None)
+            t.firstLineIndent(None)
+            t.paragraphTopSpacing(None)
+            t.paragraphBottomSpacing(None)
+            # add text
+            t += txt
+            # draw formatted string in a text box
+            textBox(t, (x, y, w, h))
+        """
+        self._indent = indent
+
+    def tailIndent(self, indent):
+        """
+        Set indent of text right of the paragraph.
+        """
+        self._tailIndent = indent
+
+    def firstLineIndent(self, indent):
+        """
+        Set indent of the text only for the first line.
+        """
+        self._firstLineIndent = indent
+
+    def paragraphTopSpacing(self, value):
+        """
+        set paragraph spacing at the top.
+        """
+        self._paragraphTopSpacing = value
+
+    def paragraphBottomSpacing(self, value):
+        """
+        set paragraph spacing at the bottom.
+        """
+        self._paragraphBottomSpacing = value
+
+    def language(self, language):
+        """
+        Set the preferred language as language tag or None to use the default language.
+        """
+        self._language = language
 
     def size(self):
         """
@@ -734,9 +1448,62 @@ class FormattedString(object):
         """
         Copy the formatted string.
         """
-        new = self.__class__()
+        attributes = {key: getattr(self, "_%s" % key) for key in self._formattedAttributes}
+        new = self.__class__(**attributes)
         new._attributedString = self._attributedString.mutableCopy()
         return new
+
+    def fontContainsCharacters(self, characters):
+        """
+        Return a bool if the current font contains the provided `characters`.
+        Characters is a string containing one or more characters.
+        """
+        font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
+        if font is None:
+            return False
+        result, glyphs = CoreText.CTFontGetGlyphsForCharacters(font, characters, None, len(characters))
+        return result
+
+    def fontContainsGlyph(self, glyphName):
+        font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
+        if font is None:
+            return False
+        glyph = font.glyphWithName_(glyphName)
+        return bool(glyph)
+
+    def fontFilePath(self):
+        """
+        Return the path to the file of the current font.
+        """
+        font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
+        if font is not None:
+            url = CoreText.CTFontDescriptorCopyAttribute(font.fontDescriptor(), CoreText.kCTFontURLAttribute)
+            if url:
+                return url.path()
+        warnings.warn("Cannot find the path to the font '%s'." % self._font)
+        return None
+
+    def listFontGlyphNames(self):
+        """
+        Return a list of glyph names supported by the current font.
+        """
+        from fontTools.ttLib import TTFont, TTLibError
+        path = self.fontFilePath()
+        if path is None:
+            return []
+        try:
+            # load the font with fontTools
+            # provide a fontNumber as lots of fonts are .ttc font files.
+            fontToolsFont = TTFont(path, lazy=True, fontNumber=0)
+        except TTLibError:
+            warnings.warn("Cannot read the font file for '%s' at the path '%s'" % (self._font, path))
+            return []
+        glyphNames = fontToolsFont.getGlyphNames()
+        fontToolsFont.close()
+        # remove .notdef from glyph names
+        if ".notdef" in glyphNames:
+            glyphNames.remove(".notdef")
+        return glyphNames
 
     def fontAscender(self):
         """
@@ -745,7 +1512,7 @@ class FormattedString(object):
         font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
         if font is None:
             ff = self._fallbackFont or _FALLBACKFONT
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._font, ff))
+            warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
             font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
         return font.ascender()
 
@@ -756,7 +1523,7 @@ class FormattedString(object):
         font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
         if font is None:
             ff = self._fallbackFont or _FALLBACKFONT
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._font, ff))
+            warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
             font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
         return font.descender()
 
@@ -767,7 +1534,7 @@ class FormattedString(object):
         font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
         if font is None:
             ff = self._fallbackFont or _FALLBACKFONT
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._font, ff))
+            warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
             font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
         return font.xHeight()
 
@@ -778,7 +1545,7 @@ class FormattedString(object):
         font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
         if font is None:
             ff = self._fallbackFont or _FALLBACKFONT
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._font, ff))
+            warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
             font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
         return font.capHeight()
 
@@ -789,7 +1556,7 @@ class FormattedString(object):
         font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
         if font is None:
             ff = self._fallbackFont or _FALLBACKFONT
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._font, ff))
+            warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
             font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
         return font.leading()
 
@@ -803,13 +1570,28 @@ class FormattedString(object):
         font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
         if font is None:
             ff = self._fallbackFont or _FALLBACKFONT
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._font, ff))
+            warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
             font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
         return font.defaultLineHeightForFont()
 
     def appendGlyph(self, *glyphNames):
         """
-        Appends a glyph by his glyph name using the current `font`.
+        Append a glyph by his glyph name using the current `font`.
+        Multiple glyph names are possible.
+
+        .. downloadcode:: appendGlyphFormattedString.py
+
+            size(1000, 400)
+            # create an empty formatted string object
+            t = FormattedString()
+            # set a font
+            t.font("Menlo-Regular")
+            # set a font size
+            t.fontSize(300)
+            # add some glyphs by glyph name
+            t.appendGlyph("A", "ampersand", "Eng", "Eng.alt")
+            # draw the formatted string
+            text(t, (100, 100))
         """
         # use a non breaking space as replacement character
         baseString = unichr(0x00A0)
@@ -817,129 +1599,41 @@ class FormattedString(object):
         if self._font:
             font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
         if font is None:
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._font, _FALLBACKFONT))
+            warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, _FALLBACKFONT))
             font = AppKit.NSFont.fontWithName_size_(_FALLBACKFONT, self._fontSize)
+
+        # disable calt features, as this seems to be on by default
+        # for both the font stored in the nsGlyphInfo as in the replacement character
+        fontAttributes = {}
+        fontAttributes[CoreText.NSFontFeatureSettingsAttribute] = [openType.featureMap["calt_off"]]
+        fontDescriptor = font.fontDescriptor()
+        fontDescriptor = fontDescriptor.fontDescriptorByAddingAttributes_(fontAttributes)
+        font = AppKit.NSFont.fontWithDescriptor_size_(fontDescriptor, self._fontSize)
+
         fallbackFont = self._fallbackFont
         self._fallbackFont = None
+        _openTypeFeatures = dict(self._openTypeFeatures)
+        self._openTypeFeatures = dict(calt=False)
         for glyphName in glyphNames:
             glyph = font.glyphWithName_(glyphName)
             if glyph:
                 self.append(baseString)
                 glyphInfo = AppKit.NSGlyphInfo.glyphInfoWithGlyph_forFont_baseString_(glyph, font, baseString)
-                self._attributedString.addAttribute_value_range_(AppKit.NSGlyphInfoAttributeName, glyphInfo, (len(self)-1, 1))
+                self._attributedString.addAttribute_value_range_(AppKit.NSGlyphInfoAttributeName, glyphInfo, (len(self) - 1, 1))
             else:
-                warnings.warn("font %s has no glyph with the name %s" % (font.fontName(), glyphName))
+                warnings.warn("font '%s' has no glyph with the name '%s'" % (font.fontName(), glyphName))
+        self.openTypeFeatures(**_openTypeFeatures)
         self._fallbackFont = fallbackFont
-
-
-class Text(object):
-
-    def __init__(self):
-        self._fontName = _FALLBACKFONT
-        self._fallbackFontName = None
-        self._fontSize = 10
-        self._lineHeight = None
-        self._tracking = None
-        self._hyphenation = None
-        self.openTypeFeatures = dict()
-
-    def _get_font(self):
-        _font = AppKit.NSFont.fontWithName_size_(self._fontName, self.fontSize)
-        if _font is None:
-            ff = self._fallbackFontName or _FALLBACKFONT
-            warnings.warn("font: %s is not installed, back to the fallback font: %s" % (self._fontName, ff))
-            self._fontName = ff
-            _font = AppKit.NSFont.fontWithName_size_(ff, self.fontSize)
-        coreTextfeatures = []
-        for featureTag, value in self.openTypeFeatures.items():
-            if not value:
-                featureTag = "%s_off" % featureTag
-            if featureTag in openType.featureMap:
-                feature = openType.featureMap[featureTag]
-                coreTextfeatures.append(feature)
-        fontDescriptor = _font.fontDescriptor()
-        fontAttributes = {
-            CoreText.NSFontFeatureSettingsAttribute: coreTextfeatures,
-            }
-        if self._fallbackFontName:
-            fontAttributes[CoreText.NSFontCascadeListAttribute] = [AppKit.NSFontDescriptor.fontDescriptorWithName_size_(self._fallbackFontName, self.fontSize)]
-        fontDescriptor = fontDescriptor.fontDescriptorByAddingAttributes_(fontAttributes)
-        _font = AppKit.NSFont.fontWithDescriptor_size_(fontDescriptor, self.fontSize)
-        return _font
-
-    font = property(_get_font)
-
-    def _get_fontName(self):
-        return self._fontName
-
-    def _set_fontName(self, fontName):
-        self._fontName = fontName
-
-    fontName = property(_get_fontName, _set_fontName)
-
-    def _get_fallbackFontName(self):
-        return self._fallbackFontName
-
-    def _set_fallbackFontName(self, fontName):
-        if fontName:
-            dummyFont = AppKit.NSFont.fontWithName_size_(fontName, 10)
-            if dummyFont is None:
-                raise DrawBotError("Fallback font '%s' is not available" % fontName)
-        self._fallbackFontName = fontName
-
-    fallbackFontName = property(_get_fallbackFontName, _set_fallbackFontName)
-
-    def _get_fontSize(self):
-        return self._fontSize
-
-    def _set_fontSize(self, value):
-        self._fontSize = value
-
-    fontSize = property(_get_fontSize, _set_fontSize)
-
-    def _get_lineHeight(self):
-        return self._lineHeight
-
-    def _set_lineHeight(self, value):
-        self._lineHeight = value
-
-    lineHeight = property(_get_lineHeight, _set_lineHeight)
-
-    def _get_tracking(self):
-        return self._tracking
-
-    def _set_tracking(self, value):
-        self._tracking = value
-
-    tracking = property(_get_tracking, _set_tracking)
-
-    def _get_hyphenation(self):
-        return self._hyphenation
-
-    def _set_hyphenation(self, value):
-        self._hyphenation = value
-
-    hyphenation = property(_get_hyphenation, _set_hyphenation)
-
-    def copy(self):
-        new = self.__class__()
-        new.fontName = self.fontName
-        new.fallbackFontName = self.fallbackFontName
-        new.fontSize = self.fontSize
-        new.lineHeight = self.lineHeight
-        new.tracking = self.tracking
-        new.hyphenation = self.hyphenation
-        new.openTypeFeatures = dict(self.openTypeFeatures)
-        return new
 
 
 class GraphicsState(object):
 
-    _textClass = Text
+    _textClass = FormattedString
     _colorClass = Color
 
     def __init__(self):
         self.colorSpace = self._colorClass.colorSpace
+        self.blendMode = None
         self.fillColor = self._colorClass(0)
         self.strokeColor = None
         self.cmykFillColor = None
@@ -952,11 +1646,13 @@ class GraphicsState(object):
         self.lineJoin = None
         self.miterLimit = 10
         self.text = self._textClass()
+        self.hyphenation = None
         self.path = None
 
     def copy(self):
         new = self.__class__()
         new.colorSpace = self.colorSpace
+        new.blendMode = self.blendMode
         if self.fillColor is not None:
             new.fillColor = self.fillColor.copy()
         else:
@@ -974,7 +1670,7 @@ class GraphicsState(object):
         if self.path is not None:
             new.path = self.path.copy()
         new.text = self.text.copy()
-
+        new.hyphenation = self.hyphenation
         new.strokeWidth = self.strokeWidth
         new.lineCap = self.lineCap
         if self.lineDash is not None:
@@ -983,16 +1679,16 @@ class GraphicsState(object):
         new.miterLimit = self.miterLimit
         return new
 
-    def update(self):
-        self.updateColorSpace()
+    def update(self, context):
+        self.updateColorSpace(context)
 
     # support for color spaces
 
     def setColorSpace(self, colorSpace):
         self.colorSpace = colorSpace
-        self.updateColorSpace()
+        self.updateColorSpace(None)
 
-    def updateColorSpace(self):
+    def updateColorSpace(self, context):
         self._colorClass.colorSpace = self.colorSpace
 
 
@@ -1002,37 +1698,69 @@ class BaseContext(object):
 
     _cmykColorClass = CMYKColor
     _colorClass = Color
-    _textClass = Text
+    _textClass = FormattedString
     _shadowClass = Shadow
     _bezierPathClass = BezierPath
     _gradientClass = Gradient
 
     fileExtensions = []
+    saveImageOptions = []
+    validateSaveImageOptions = True
 
     _lineJoinStylesMap = dict(
         miter=Quartz.kCGLineJoinMiter,
         round=Quartz.kCGLineJoinRound,
         bevel=Quartz.kCGLineJoinBevel
-        )
+    )
 
     _lineCapStylesMap = dict(
         butt=Quartz.kCGLineCapButt,
         square=Quartz.kCGLineCapSquare,
         round=Quartz.kCGLineCapRound,
-        )
+    )
 
-    _textAlignMap = dict(
-        center=AppKit.NSCenterTextAlignment,
-        left=AppKit.NSLeftTextAlignment,
-        right=AppKit.NSRightTextAlignment,
-        justified=AppKit.NSJustifiedTextAlignment,
-        )
+    _textAlignMap = FormattedString._textAlignMap
+    _textTabAlignMap = FormattedString._textTabAlignMap
+    _textUnderlineMap = FormattedString._textUnderlineMap
 
     _colorSpaceMap = dict(
         genericRGB=AppKit.NSColorSpace.genericRGBColorSpace,
         adobeRGB1998=AppKit.NSColorSpace.adobeRGB1998ColorSpace,
         sRGB=AppKit.NSColorSpace.sRGBColorSpace,
-        )
+        genericGray=AppKit.NSColorSpace.genericGrayColorSpace,
+        genericGamma22Gray=AppKit.NSColorSpace.genericGamma22GrayColorSpace,
+    )
+
+    _blendModeMap = dict(
+        normal=Quartz.kCGBlendModeNormal,
+        multiply=Quartz.kCGBlendModeMultiply,
+        screen=Quartz.kCGBlendModeScreen,
+        overlay=Quartz.kCGBlendModeOverlay,
+        darken=Quartz.kCGBlendModeDarken,
+        lighten=Quartz.kCGBlendModeLighten,
+        colorDodge=Quartz.kCGBlendModeColorDodge,
+        colorBurn=Quartz.kCGBlendModeColorBurn,
+        softLight=Quartz.kCGBlendModeSoftLight,
+        hardLight=Quartz.kCGBlendModeHardLight,
+        difference=Quartz.kCGBlendModeDifference,
+        exclusion=Quartz.kCGBlendModeExclusion,
+        hue=Quartz.kCGBlendModeHue,
+        saturation=Quartz.kCGBlendModeSaturation,
+        color=Quartz.kCGBlendModeColor,
+        luminosity=Quartz.kCGBlendModeLuminosity,
+        clear=Quartz.kCGBlendModeClear,
+        copy=Quartz.kCGBlendModeCopy,
+        sourceIn=Quartz.kCGBlendModeSourceIn,
+        sourceOut=Quartz.kCGBlendModeSourceOut,
+        sourceAtop=Quartz.kCGBlendModeSourceAtop,
+        destinationOver=Quartz.kCGBlendModeDestinationOver,
+        destinationIn=Quartz.kCGBlendModeDestinationIn,
+        destinationOut=Quartz.kCGBlendModeDestinationOut,
+        destinationAtop=Quartz.kCGBlendModeDestinationAtop,
+        xOR=Quartz.kCGBlendModeXOR,
+        plusDarker=Quartz.kCGBlendModePlusDarker,
+        plusLighter=Quartz.kCGBlendModePlusLighter,
+    )
 
     _softHypen = 0x00AD
 
@@ -1053,6 +1781,9 @@ class BaseContext(object):
     def _restore(self):
         pass
 
+    def _blendMode(self, operation):
+        pass
+
     def _drawPath(self):
         pass
 
@@ -1062,32 +1793,36 @@ class BaseContext(object):
     def _transform(self, matrix):
         pass
 
-    def _text(self, txt, (x, y)):
+    def _textBox(self, txt, box, align):
         pass
 
-    def _textBox(self, txt, (x, y, w, h), align):
-        pass
-
-    def _image(self, path, (x, y), alpha):
+    def _image(self, path, xy, alpha, pageNumber):
         pass
 
     def _frameDuration(self, seconds):
         pass
 
-    def _reset(self):
+    def _reset(self, other=None):
         pass
 
-    def _saveImage(self, path, multipage):
+    def _saveImage(self, path, options):
         pass
 
     def _printImage(self, pdf=None):
         pass
 
-    ###
+    def _linkDestination(self, name, xy):
+        pass
+
+    def _linkRect(self, name, xywh):
+        pass
+
+    #
 
     def reset(self):
         self._stack = []
         self._state = self._graphicsStateClass()
+        self._colorClass.colorSpace = self._colorSpaceMap['genericRGB']
         self._reset()
 
     def size(self, width=None, height=None):
@@ -1104,10 +1839,10 @@ class BaseContext(object):
         self.hasPage = True
         self._newPage(width, height)
 
-    def saveImage(self, path, multipage):
+    def saveImage(self, path, options):
         if not self.hasPage:
             raise DrawBotError("can't save image when no page is set")
-        self._saveImage(path, multipage)
+        self._saveImage(path, options)
 
     def printImage(self, pdf=None):
         self._printImage(pdf)
@@ -1123,7 +1858,7 @@ class BaseContext(object):
         if not self._stack:
             raise DrawBotError("can't restore graphics state: no matching save()")
         self._state = self._stack.pop()
-        self._state.update()
+        self._state.update(self)
         self._restore()
 
     def rect(self, x, y, w, h):
@@ -1150,6 +1885,9 @@ class BaseContext(object):
     def curveTo(self, pt1, pt2, pt):
         self._state.path.curveTo(pt1, pt2, pt)
 
+    def arc(self, center, radius, startAngle, endAngle, clockwise):
+        self._state.path.arc(center, radius, startAngle, endAngle, clockwise)
+
     def arcTo(self, pt1, pt2, radius):
         self._state.path.arcTo(pt1, pt2, radius)
 
@@ -1174,36 +1912,45 @@ class BaseContext(object):
         colorSpace = self._colorSpaceMap[colorSpace]
         self._state.setColorSpace(colorSpace)
 
+    def blendMode(self, operation):
+        self._state.blendMode = operation
+        self._blendMode(operation)
+
     def fill(self, r, g=None, b=None, a=1):
+        self._state.text.fill(r, g, b, a)
+        self._state.cmykFillColor = None
         if r is None:
             self._state.fillColor = None
-            self._state.cmykFillColor = None
             return
         self._state.fillColor = self._colorClass(r, g, b, a)
         self._state.gradient = None
 
     def cmykFill(self, c, m, y, k, a=1):
+        self._state.text.cmykFill(c, m, y, k, a)
         if c is None:
             self.fill(None)
         else:
             self._state.cmykFillColor = self._cmykColorClass(c, m, y, k, a)
             r, g, b = cmyk2rgb(c, m, y, k)
-            self.fill(r, g, b, a)
+            self._state.fillColor = self._colorClass(r, g, b, a)
+            self._state.gradient = None
 
     def stroke(self, r, g=None, b=None, a=1):
+        self._state.text.stroke(r, g, b, a)
+        self._state.cmykStrokeColor = None
         if r is None:
             self._state.strokeColor = None
-            self._state.cmykStrokeColor = None
             return
         self._state.strokeColor = self._colorClass(r, g, b, a)
 
     def cmykStroke(self, c, m, y, k, a=1):
+        self._state.text.cmykStroke(c, m, y, k, a)
         if c is None:
             self.stroke(None)
         else:
             self._state.cmykStrokeColor = self._cmykColorClass(c, m, y, k, a)
             r, g, b = cmyk2rgb(c, m, y, k)
-            self.stroke(r, g, b, a)
+            self._state.strokeColor = self._colorClass(r, g, b, a)
 
     def shadow(self, offset, blur, color):
         if offset is None:
@@ -1256,6 +2003,7 @@ class BaseContext(object):
         self.fill(None)
 
     def strokeWidth(self, value):
+        self._state.text.strokeWidth(value)
         self._state.strokeWidth = value
 
     def miterLimit(self, value):
@@ -1276,7 +2024,7 @@ class BaseContext(object):
         self._state.lineCap = self._lineCapStylesMap[cap]
 
     def lineDash(self, dash):
-        if dash[0] == None:
+        if dash[0] is None:
             self._state.lineDash = None
             return
         self._state.lineDash = list(dash)
@@ -1285,70 +2033,50 @@ class BaseContext(object):
         self._transform(matrix)
 
     def font(self, fontName, fontSize):
-        self._state.text.fontName = fontName
-        if fontSize is not None:
-            self.fontSize(fontSize)
+        return self._state.text.font(fontName, fontSize)
 
     def fallbackFont(self, fontName):
-        self._state.text.fallbackFontName = fontName
+        self._state.text.fallbackFont(fontName)
 
     def fontSize(self, fontSize):
-        self._state.text.fontSize = fontSize
+        self._state.text.fontSize(fontSize)
 
     def lineHeight(self, lineHeight):
-        self._state.text.lineHeight = lineHeight
+        self._state.text.lineHeight(lineHeight)
 
     def tracking(self, tracking):
-        self._state.text.tracking = tracking
+        self._state.text.tracking(tracking)
+
+    def baselineShift(self, baselineShift):
+        self._state.text.baselineShift(baselineShift)
+
+    def underline(self, underline):
+        self._state.text.underline(underline)
 
     def hyphenation(self, value):
-        self._state.text.hyphenation = value
+        self._state.hyphenation = value
+
+    def tabs(self, *tabs):
+        self._state.text.tabs(*tabs)
+
+    def language(self, language):
+        self._state.text.language(language)
 
     def openTypeFeatures(self, *args, **features):
-        if args and args[0] == None:
-            self._state.text.openTypeFeatures.clear()
-        else:
-            self._state.text.openTypeFeatures.update(features)
+        self._state.text.openTypeFeatures(*args, **features)
+
+    def fontVariations(self, *args, **axes):
+        self._state.text.fontVariations(*args, **axes)
 
     def attributedString(self, txt, align=None):
         if isinstance(txt, FormattedString):
             return txt.getNSObject()
-        attributes = {AppKit.NSFontAttributeName: self._state.text.font}
-        if self._state.fillColor is not None:
-            if self._state.cmykFillColor:
-                c = self._state.cmykFillColor
-            else:
-                c = self._state.fillColor
-            extra = {
-                AppKit.NSForegroundColorAttributeName: c.getNSObject(),
-                }
-            attributes.update(extra)
-        if self._state.strokeColor is not None:
-            if self._state.cmykStrokeColor:
-                c = self._state.cmykStrokeColor
-            else:
-                c = self._state.strokeColor
-            # strokeWidth = -abs(self._state.strokeWidth)
-            extra = {
-                    # AppKit.NSStrokeWidthAttributeName: strokeWidth,
-                    AppKit.NSStrokeColorAttributeName: c.getNSObject(),
-                    }
+        self._state.text.clear()
+        self._state.text.append(txt, align=align)
+        return self._state.text.getNSObject()
 
-            attributes.update(extra)
-        para = AppKit.NSMutableParagraphStyle.alloc().init()
-        if align:
-            para.setAlignment_(self._textAlignMap[align])
-        if self._state.text.lineHeight:
-            # para.setLineSpacing_(self._state.text.lineHeight)
-            para.setMaximumLineHeight_(self._state.text.lineHeight)
-            para.setMinimumLineHeight_(self._state.text.lineHeight)
-        attributes[AppKit.NSParagraphStyleAttributeName] = para
-        if self._state.text.tracking:
-            attributes[AppKit.NSKernAttributeName] = self._state.text.tracking
-        text = AppKit.NSAttributedString.alloc().initWithString_attributes_(txt, attributes)
-        return text
-
-    def hyphenateAttributedString(self, attrString, width):
+    def hyphenateAttributedString(self, attrString, path):
+        # add soft hyphens
         attrString = attrString.mutableCopy()
         mutString = attrString.mutableString()
         wordRange = AppKit.NSMakeRange(mutString.length(), 0)
@@ -1360,47 +2088,84 @@ class BaseContext(object):
                 if hyphenIndex != AppKit.NSNotFound:
                     mutString.insertString_atIndex_(unichr(self._softHypen), hyphenIndex)
 
-        textLength = attrString.length()
+        # get the lines
+        lines = self._getTypesetterLinesWithPath(attrString, path)
+        # get all lines justified
+        justifiedLines = self._getTypesetterLinesWithPath(self._justifyAttributedString(attrString), path)
 
-        setter = CoreText.CTTypesetterCreateWithAttributedString(attrString)
-        location = 0
-
-        while location < textLength:
-            breakIndex = CoreText.CTTypesetterSuggestLineBreak(setter, location, width)
-            sub = attrString.attributedSubstringFromRange_((location, breakIndex))
-            location += breakIndex
-            subString = sub.string()
-            if breakIndex == 0:
-                break
-            subString = sub.string()
-            if subString[-1] == unichr(self._softHypen):
-                subAttr, _ = sub.attributesAtIndex_effectiveRange_(0, None)
-                hyphenAttrString = AppKit.NSAttributedString.alloc().initWithString_attributes_("-", subAttr)
+        # loop over all lines
+        i = 0
+        while i < len(lines):
+            # get the current line
+            line = lines[i]
+            # get the range in the text for the current line
+            rng = CoreText.CTLineGetStringRange(line)
+            # get the substring from the range
+            subString = attrString.attributedSubstringFromRange_(rng)
+            # get the string
+            subStringText = subString.string()
+            # check if the line ends with a softhypen
+            if len(subStringText) and subStringText[-1] == unichr(self._softHypen):
+                # here we go
+                # get the justified line and get the max line width
+                maxLineWidth, a, d, l = CoreText.CTLineGetTypographicBounds(justifiedLines[i], None, None, None)
+                # get the last attributes
+                hyphenAttr, _ = subString.attributesAtIndex_effectiveRange_(0, None)
+                # create a hyphen string
+                hyphenAttrString = AppKit.NSAttributedString.alloc().initWithString_attributes_("-", hyphenAttr)
+                # get the width of the hyphen
                 hyphenWidth = hyphenAttrString.size().width
-                if sub.size().width + hyphenWidth < width:
-                    mutString.insertString_atIndex_("-", location)
-                    setter = CoreText.CTTypesetterCreateWithAttributedString(attrString)
-                    location += 1
-                else:
-                    attrString.deleteCharactersInRange_((location-1, 1))
-                    setter = CoreText.CTTypesetterCreateWithAttributedString(attrString)
-                    location -= breakIndex
+                # get all line break location of that line
+                lineBreakLocation = len(subString)
+                possibleLineBreaks = [lineBreakLocation]
+                while lineBreakLocation:
+                    lineBreakLocation = subString.lineBreakBeforeIndex_withinRange_(lineBreakLocation, (0, len(subString)))
+                    if lineBreakLocation:
+                        possibleLineBreaks.append(lineBreakLocation)
+                breakFound = False
+                # loop over all possible line breaks
+                while possibleLineBreaks:
+                    lineBreak = possibleLineBreaks.pop(0)
+                    # get a possible line
+                    breakString = subString.attributedSubstringFromRange_((0, lineBreak))
+                    # get the width
+                    stringWidth = breakString.size().width
+                    # add hyphen width if required
+                    if breakString.string()[-1] == unichr(self._softHypen):
+                        stringWidth += hyphenWidth
+                    # found a break
+                    if stringWidth <= maxLineWidth:
+                        breakFound = True
+                        break
 
+                if breakFound and len(breakString.string()) > 2 and breakString.string()[-1] == unichr(self._softHypen):
+                    # if the break line ends with a soft hyphen
+                    # add a hyphen
+                    attrString.replaceCharactersInRange_withString_((rng.location + lineBreak, 0), "-")
+                # remove all soft hyphens for the range of that line
+                mutString.replaceOccurrencesOfString_withString_options_range_(unichr(self._softHypen), "", AppKit.NSLiteralSearch, rng)
+                # reset the lines, from the adjusted attribute string
+                lines = self._getTypesetterLinesWithPath(attrString, path)
+                # reset the justifed lines form the adjusted attributed string
+                justifiedLines = self._getTypesetterLinesWithPath(self._justifyAttributedString(attrString), path)
+            # next line
+            i += 1
+        # remove all soft hyphen
         mutString.replaceOccurrencesOfString_withString_options_range_(unichr(self._softHypen), "", AppKit.NSLiteralSearch, (0, mutString.length()))
+        # done!
         return attrString
 
-    def clippedText(self, txt, (x, y, w, h), align):
+    def clippedText(self, txt, box, align):
+        path, origin = self._getPathForFrameSetter(box)
         attrString = self.attributedString(txt, align=align)
-        if self._state.text.hyphenation:
+        if self._state.hyphenation:
             hyphenIndexes = [i for i, c in enumerate(attrString.string()) if c == "-"]
-            attrString = self.hyphenateAttributedString(attrString, w)
+            attrString = self.hyphenateAttributedString(attrString, path)
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
-        path = CoreText.CGPathCreateMutable()
-        CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
         box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
         visibleRange = CoreText.CTFrameGetVisibleStringRange(box)
         clip = visibleRange.length
-        if self._state.text.hyphenation:
+        if self._state.hyphenation:
             subString = attrString.string()[:clip]
             for i in hyphenIndexes:
                 if i < clip:
@@ -1410,14 +2175,95 @@ class BaseContext(object):
             clip -= subString.count("-")
         return txt[clip:]
 
-    def textSize(self, txt, align):
-        text = self.attributedString(txt, align)
-        w, h = text.size()
+    def _justifyAttributedString(self, attr):
+        # create a justified copy of the attributed string
+        attr = attr.mutableCopy()
+
+        def changeParaAttribute(para, rng, _):
+            para = para.mutableCopy()
+            para.setAlignment_(AppKit.NSJustifiedTextAlignment)
+            attr.addAttribute_value_range_(AppKit.NSParagraphStyleAttributeName, para, rng)
+
+        attr.enumerateAttribute_inRange_options_usingBlock_(AppKit.NSParagraphStyleAttributeName, (0, len(attr)), 0, changeParaAttribute)
+        return attr
+
+    def _getTypesetterLinesWithPath(self, attrString, path, offset=None):
+        # get lines for an attribute string with a given path
+        if offset is None:
+            offset = 0, 0
+        setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
+        frame = CoreText.CTFramesetterCreateFrame(setter, offset, path, None)
+        return CoreText.CTFrameGetLines(frame)
+
+    def _getPathForFrameSetter(self, box):
+        if isinstance(box, self._bezierPathClass):
+            path = box._getCGPath()
+            (x, y), (w, h) = CoreText.CGPathGetPathBoundingBox(path)
+        else:
+            x, y, w, h = box
+            path = CoreText.CGPathCreateMutable()
+            CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
+        return path, (x, y)
+
+    def textSize(self, txt, align, width, height):
+        attrString = self.attributedString(txt, align)
+        if width is None:
+            w, h = attrString.size()
+        else:
+            if width is None:
+                width = CoreText.CGFLOAT_MAX
+            if height is None:
+                height = CoreText.CGFLOAT_MAX
+            if self._state.hyphenation:
+                path = CoreText.CGPathCreateMutable()
+                CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(0, 0, width, height))
+                attrString = self.hyphenateAttributedString(attrString, path)
+            setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
+            (w, h), _ = CoreText.CTFramesetterSuggestFrameSizeWithConstraints(setter, (0, 0), None, (width, height), None)
         return w, h
 
-    def textBox(self, txt, (x, y, w, h), align="left"):
+    def textBox(self, txt, box, align="left"):
         self._state.path = None
-        self._textBox(txt, (x, y, w, h), align)
+        self._textBox(txt, box, align)
 
-    def image(self, path, (x, y), alpha):
-        self._image(path, (x, y), alpha)
+    def image(self, path, xy, alpha, pageNumber):
+        x, y = xy
+        self._image(path, (x, y), alpha, pageNumber)
+
+    def installFont(self, path):
+        url = AppKit.NSURL.fileURLWithPath_(path)
+        success, error = CoreText.CTFontManagerRegisterFontsForURL(url, CoreText.kCTFontManagerScopeProcess, None)
+        if not success:
+            error = error.localizedDescription()
+        return success, error
+
+    def uninstallFont(self, path):
+        url = AppKit.NSURL.fileURLWithPath_(path)
+        success, error = CoreText.CTFontManagerUnregisterFontsForURL(url, CoreText.kCTFontManagerScopeProcess, None)
+        if not success:
+            error = error.localizedDescription()
+        return success, error
+
+    def _fontNameForPath(self, path):
+        from fontTools.ttLib import TTFont, TTLibError
+        try:
+            font = TTFont(path, fontNumber=0)  # in case of .ttc, use the first font
+            psName = font["name"].getName(6, 1, 0)
+            if psName is None:
+                psName = font["name"].getName(6, 3, 1)
+            font.close()
+        except IOError:
+            raise DrawBotError("Font '%s' does not exist." % path)
+        except TTLibError:
+            raise DrawBotError("Font '%s' is not a valid font." % path)
+        if psName is not None:
+            psName = psName.toUnicode()
+        return psName
+
+    def linkDestination(self, name, xy):
+        x, y = xy
+        self._linkDestination(name, (x, y))
+
+    def linkRect(self, name, xywh):
+        x, y, w, h = xywh
+        self._linkRect(name, (x, y, w, h))

@@ -24,10 +24,19 @@
 			<string></string>
 		</dict>
 	</array>
+	<key>com.robofontmechanic.Mechanic</key>
+	<dict>
+		<key>repository</key>
+		<string>typemytype/drawBotRoboFontExtension</string>
+		<key>summary</key>
+		<string>DrawBot is a powerfull 2D graphics scripting tool.</string>
+	</dict>
 	<key>developer</key>
 	<string>DrawBot</string>
 	<key>developerURL</key>
 	<string>http://drawbot.com</string>
+	<key>extensionPath</key>
+	<string>DrawBot.roboFontExt</string>
 	<key>html</key>
 	<true/>
 	<key>launchAtStartUp</key>
@@ -39,14 +48,10 @@
 	<key>requiresVersionMajor</key>
 	<string>1</string>
 	<key>requiresVersionMinor</key>
-	<string>5.2</string>
+	<string>8</string>
 	<key>timeStamp</key>
-	<real>1417707288.3324709</real>
+	<real>1417707288.332471</real>
 	<key>version</key>
-	<string>1.3</string>
-	<key>repository</key>
-    <string>typemytype/drawBotRoboFontExtension</string>
-    <key>extensionPath</key>
-    <string>DrawBot.roboFontExt</string>
+	<string>3.112</string>
 </dict>
 </plist>

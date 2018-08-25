@@ -1,7 +1,9 @@
+from fontTools.misc.py23 import PY2
 import sys
 import traceback
 
 from AppKit import *
+
 
 class StdOutput(object):
 
@@ -10,11 +12,12 @@ class StdOutput(object):
         self.isError = isError
 
     def write(self, data):
-        if isinstance(data, str):
-            try:
-                data = unicode(data, "utf-8", "replace")
-            except UnicodeDecodeError:
-                data = "XXX " + repr(data)
+        if PY2:
+            if isinstance(data, str):
+                try:
+                    data = unicode(data, "utf-8", "replace")
+                except UnicodeDecodeError:
+                    data = "XXX " + repr(data)
         self.data.append((data, self.isError))
 
     def flush(self):
@@ -23,17 +26,7 @@ class StdOutput(object):
     def close(self):
         pass
 
-class DrawBotNamespace(dict):
 
-    def __init__(self, context, variables):
-        self._context = context
-        self._variables = variables
-
-    def __getitem__(self, item):
-        if item in self._variables:
-            return getattr(self._context, item)
-        return super(DrawBotNamespace, self).__getitem__(item)
-        
 def CallbackRunner(callback, stdout=None, stderr=None, args=[], kwargs={}, fallbackResult=None):
     result = fallbackResult
     saveStdout = sys.stdout
@@ -56,6 +49,7 @@ def CallbackRunner(callback, stdout=None, stderr=None, args=[], kwargs={}, fallb
 
     return result
 
+
 def createSavePDFImage():
     im = NSImage.imageNamed_("toolbarScriptNew")
     pdfText = NSString.stringWithString_("PDF")
@@ -64,18 +58,18 @@ def createSavePDFImage():
     shadow.setShadowOffset_((0, -1))
     shadow.setShadowColor_(NSColor.whiteColor())
     shadow.setShadowBlurRadius_(1)
-                        
+
     attributes = {
-                NSFontAttributeName : NSFont.boldSystemFontOfSize_(7),
-                NSForegroundColorAttributeName : NSColor.darkGrayColor(),
-                NSShadowAttributeName : shadow
-                }
-    
+        NSFontAttributeName: NSFont.boldSystemFontOfSize_(7),
+        NSForegroundColorAttributeName: NSColor.darkGrayColor(),
+        NSShadowAttributeName: shadow
+    }
+
     pdfSaveImage = NSImage.alloc().initWithSize_(im.size())
-    
+
     pdfSaveImage.lockFocus()
     im.drawAtPoint_fromRect_operation_fraction_((0, 0), NSZeroRect, NSCompositeSourceOver, 1)
     pdfText.drawAtPoint_withAttributes_((10, 10), attributes)
     pdfSaveImage.unlockFocus()
-    
+
     return pdfSaveImage

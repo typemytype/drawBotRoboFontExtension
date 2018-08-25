@@ -1,14 +1,17 @@
-from AppKit import *
+from Foundation import NSURL
+from AppKit import NSDragOperationNone, NSBezelBorder
 from Quartz import PDFView, PDFThumbnailView, PDFDocument
 
 from vanilla import Group
 
 epsPasteBoardType = "CorePasteboardFlavorType 0x41494342"
 
+
 class DrawBotPDFThumbnailView(PDFThumbnailView):
 
     def draggingUpdated_(self, draggingInfo):
         return NSDragOperationNone
+
 
 class ThumbnailView(Group):
 
@@ -30,17 +33,31 @@ class ThumbnailView(Group):
                 return index
         return -1
 
+
+class DrawBotPDFView(PDFView):
+
+    def performKeyEquivalent_(self, event):
+        # catch a bug in PDFView
+        # cmd + ` causes a traceback
+        # DrawBot[15705]: -[__NSCFConstantString characterAtIndex:]: Range or index out of bounds
+        try:
+            return super(DrawBotPDFView, self).performKeyEquivalent_(event)
+        except:
+            return False
+
+
 class DrawView(Group):
 
-    nsViewClass = PDFView
+    nsViewClass = DrawBotPDFView
 
     def __init__(self, posSize):
         super(DrawView, self).__init__(posSize)
         pdfView = self.getNSView()
         pdfView.setAutoScales_(True)
         view = pdfView.documentView()
-        scrollview = view.enclosingScrollView()
-        scrollview.setBorderType_(NSBezelBorder)
+        if view is not None:
+            scrollview = view.enclosingScrollView()
+            scrollview.setBorderType_(NSBezelBorder)
 
     def get(self):
         pdf = self.getNSView().document()
@@ -49,7 +66,7 @@ class DrawView(Group):
         return pdf.dataRepresentation()
 
     def set(self, pdfData):
-        pdf = PDFDocument.alloc().initWithData_(self._pdfData)
+        pdf = PDFDocument.alloc().initWithData_(pdfData)
         self.setPDFDocument(pdf)
 
     def setPath(self, path):
@@ -88,5 +105,3 @@ class DrawView(Group):
                 self.scrollDown()
         else:
             self.scrollDown()
-
-
