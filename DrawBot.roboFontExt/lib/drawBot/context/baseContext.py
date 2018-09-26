@@ -5,6 +5,7 @@ import CoreText
 import Quartz
 
 import math
+import os
 
 from fontTools.pens.basePen import BasePen
 from fontTools.misc.py23 import basestring, PY2, unichr
@@ -94,7 +95,7 @@ class BezierPath(BasePen):
 
     def __init__(self, path=None, glyphSet=None):
         if path is None:
-            self._path = AppKit.NSBezierPath.bezierPath()
+            self._path = AppKit.NSBezierPath.alloc().init()
         else:
             self._path = path
         BasePen.__init__(self, glyphSet)
@@ -153,8 +154,9 @@ class BezierPath(BasePen):
         """
         if hasattr(self, "_pointToSegmentPen"):
             # its been uses in a point pen world
-            self._pointToSegmentPen.endPath()
+            pointToSegmentPen = self._pointToSegmentPen
             del self._pointToSegmentPen
+            pointToSegmentPen.endPath()
 
     def drawToPen(self, pen):
         """
@@ -362,7 +364,7 @@ class BezierPath(BasePen):
     def optimizePath(self):
         count = self._path.elementCount()
         if self._path.elementAtIndex_(count - 1) == AppKit.NSMoveToBezierPathElement:
-            optimizedPath = AppKit.NSBezierPath.bezierPath()
+            optimizedPath = AppKit.NSBezierPath.alloc().init()
             for i in range(count - 1):
                 instruction, points = self._path.elementAtIndex_associatedPoints_(i)
                 if instruction == AppKit.NSMoveToBezierPathElement:
@@ -452,7 +454,7 @@ class BezierPath(BasePen):
         """
         if center != (0, 0):
             transformMatrix = transformationAtCenter(transformMatrix, center)
-        aT = AppKit.NSAffineTransform.transform()
+        aT = AppKit.NSAffineTransform.alloc().init()
         aT.setTransformStruct_(transformMatrix[:])
         self._path.transformUsingAffineTransform_(aT)
 
@@ -1029,6 +1031,15 @@ class FormattedString(object):
         if self._tabs:
             for tabStop in para.tabStops():
                 para.removeTabStop_(tabStop)
+
+            if len(self._tabs) < 12:
+                self._tabs = list(self._tabs)
+                # add tab stops if there is not enough stops...
+                # the default is 12 tabs, so lets add 12 in steps of 28
+                lastTabValue = self._tabs[-1][0]
+                for tabIndex in range(12 - len(self._tabs)):
+                    self._tabs.append((lastTabValue + 28 * (tabIndex + 1), "left"))
+
             for tab, tabAlign in self._tabs:
                 tabOptions = None
                 if tabAlign in self._textTabAlignMap:
@@ -1252,7 +1263,9 @@ class FormattedString(object):
 
     def openTypeFeatures(self, *args, **features):
         """
-        Enable OpenType features.
+        Enable OpenType features and return the current openType features settings.
+
+        If no arguments are given `openTypeFeatures()` will just return the current openType features settings.
 
         .. downloadcode:: openTypeFeaturesFormattedString.py
 
@@ -1272,10 +1285,22 @@ class FormattedString(object):
             # draw the formatted string
             text(t, (10, 80))
         """
-        if args and args[0] is None:
+        if args and features:
+            raise DrawBotError("Can't combine positional arguments and keyword arguments")
+        if args:
+            if len(args) != 1:
+                raise DrawBotError("There can only be one positional argument")
+            if args[0] is not None:
+                raise DrawBotError("First positional argument can only be None")
+            warnings.warn("openTypeFeatures(None) is deprecated, use openTypeFeatures(resetFeatures=True) instead.")
             self._openTypeFeatures.clear()
         else:
+            if features.pop("resetFeatures", False):
+                self._openTypeFeatures.clear()
             self._openTypeFeatures.update(features)
+        currentFeatures = self.listOpenTypeFeatures()
+        currentFeatures.update(self._openTypeFeatures)
+        return currentFeatures
 
     def listOpenTypeFeatures(self, fontName=None):
         """
@@ -1291,12 +1316,27 @@ class FormattedString(object):
 
     def fontVariations(self, *args, **axes):
         """
-        Pick a variation by axes values.
+        Pick a variation by axes values and return the current font variations settings.
+
+        If no arguments are given `fontVariations()` will just return the current font variations settings.
         """
-        if args and args[0] is None:
+        if args and axes:
+            raise DrawBotError("Can't combine positional arguments and keyword arguments")
+        if args:
+            if len(args) != 1:
+                raise DrawBotError("There can only be one positional argument")
+            if args[0] is not None:
+                raise DrawBotError("First positional argument can only be None")
+            warnings.warn("fontVariations(None) is deprecated, use fontVariations(resetVariations=True) instead.")
             self._fontVariations.clear()
         else:
+            if axes.pop("resetVariations", False):
+                self._fontVariations.clear()
             self._fontVariations.update(axes)
+        defaultVariations = self.listFontVariations()
+        currentVariation = {axis: data["defaultValue"] for axis, data in defaultVariations.items()}
+        currentVariation.update(self._fontVariations)
+        return currentVariation
 
     def listFontVariations(self, fontName=None):
         """
@@ -1488,17 +1528,55 @@ class FormattedString(object):
         Return a list of glyph names supported by the current font.
         """
         from fontTools.ttLib import TTFont, TTLibError
+        from fontTools.misc.macRes import ResourceReader, ResourceError
+
         path = self.fontFilePath()
         if path is None:
             return []
         try:
             # load the font with fontTools
             # provide a fontNumber as lots of fonts are .ttc font files.
-            fontToolsFont = TTFont(path, lazy=True, fontNumber=0)
+            # search for the res_name_or_index for .dfont files.
+            res_name_or_index = None
+            fontNumber = None
+            ext = os.path.splitext(path)[-1].lower()
+            if ext == ".ttc":
+                def _getPSName(source):
+                    # get PS name
+                    name = source["name"]
+                    psName = name.getName(6, 1, 0)
+                    if psName is None:
+                        psName.getName(6, 3, 1)
+                    return psName.toStr()
+
+                ttc = TTFont(path, lazy=True, fontNumber=0)
+                numFonts = ttc.reader.numFonts
+                foundPSName = False
+                for fontNumber in range(numFonts):
+                    source = TTFont(path, lazy=True, fontNumber=fontNumber)
+                    psName = _getPSName(source)
+                    if psName == self._font:
+                        foundPSName = True
+                        break
+                if not foundPSName:
+                    # fallback to the first font in the ttc.
+                    fontNumber = 0
+
+            elif ext == ".dfont":
+                try:
+                    reader = ResourceReader(path)
+                    names = reader.getNames("sfnt")
+                    if self._font in names:
+                        res_name_or_index = self._font
+                    else:
+                        res_name_or_index = names[0]
+                except ResourceError:
+                    pass
+            fontToolsFont = TTFont(path, lazy=True, fontNumber=fontNumber, res_name_or_index=res_name_or_index)
         except TTLibError:
             warnings.warn("Cannot read the font file for '%s' at the path '%s'" % (self._font, path))
             return []
-        glyphNames = fontToolsFont.getGlyphNames()
+        glyphNames = fontToolsFont.getGlyphOrder()
         fontToolsFont.close()
         # remove .notdef from glyph names
         if ".notdef" in glyphNames:
@@ -1885,6 +1963,9 @@ class BaseContext(object):
     def curveTo(self, pt1, pt2, pt):
         self._state.path.curveTo(pt1, pt2, pt)
 
+    def qCurveTo(self, points):
+        self._state.path.qCurveTo(*points)
+
     def arc(self, center, radius, startAngle, endAngle, clockwise):
         self._state.path.arc(center, radius, startAngle, endAngle, clockwise)
 
@@ -2063,10 +2144,10 @@ class BaseContext(object):
         self._state.text.language(language)
 
     def openTypeFeatures(self, *args, **features):
-        self._state.text.openTypeFeatures(*args, **features)
+        return self._state.text.openTypeFeatures(*args, **features)
 
     def fontVariations(self, *args, **axes):
-        self._state.text.fontVariations(*args, **axes)
+        return self._state.text.fontVariations(*args, **axes)
 
     def attributedString(self, txt, align=None):
         if isinstance(txt, FormattedString):

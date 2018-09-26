@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 import sys
 import os
 
@@ -8,7 +6,6 @@ from fontTools.pens.cocoaPen import CocoaPen
 from drawBot.drawBotDrawingTools import _drawBotDrawingTool
 from drawBot.context.baseContext import BezierPath
 from drawBot.context import subscribeContext
-from drawBot.misc import getExternalToolPath
 
 from mojo.events import addObserver
 from mojo.extensions import getExtensionDefault
@@ -16,14 +13,15 @@ from mojo.extensions import getExtensionDefault
 from drawBotController import DrawBotController
 import glyphContext
 
+root = os.path.dirname(__file__)
 # add drawBot to the sys path
-sys.path.append(os.path.dirname(__file__))
+sys.path.append(root)
 
 # set the gifsicle tool as executable
-gifsicle = getExternalToolPath(os.path.join(os.path.dirname(__file__), "drawBot", "context", "tools"), "gifsicle")
-potrace = getExternalToolPath(os.path.join(os.path.dirname(__file__), "drawBot", "context", "tools"), "potrace")
-mkbitmap = getExternalToolPath(os.path.join(os.path.dirname(__file__), "drawBot", "context", "tools"), "mkbitmap")
-os.chmod(gifsicle, 0o0755)
+gifsiclePath = os.path.join(root, "drawBot", "context", "tools", "gifsicle")
+potrace = os.path.join(root, "drawBot", "context", "tools", "potrace")
+mkbitmap = os.path.join(root, "drawBot", "context", "tools", "mkbitmap")
+os.chmod(gifsiclePath, 0o0755)
 os.chmod(potrace, 0o0755)
 os.chmod(mkbitmap, 0o0755)
 
@@ -63,11 +61,11 @@ subscribeContext(glyphContext.GlyphContext)
 # reload the module to make them everwhere available
 import drawBot
 try:
+    # in py2
     reload
 except NameError:
-    # reload is not available on py3
-    import importlib
-    reload = importlib.reload
+    # in py3
+    from importlib import reload
 
 reload(drawBot)
 

@@ -14,8 +14,9 @@ from .context.dummyContext import DummyContext
 
 from .context.tools.imageObject import ImageObject
 from .context.tools import gifTools
+from .context.tools import openType
 
-from .misc import DrawBotError, warnings, VariableController, optimizePath, isPDF, isEPS, isGIF, transformationAtCenter
+from .misc import DrawBotError, warnings, VariableController, optimizePath, isPDF, isEPS, isGIF, transformationAtCenter, clearMemoizeCache
 
 from fontTools.misc.py23 import basestring, PY2
 
@@ -27,9 +28,6 @@ def _getmodulecontents(module, names=None):
     for name in names:
         d[name] = getattr(module, name)
     return d
-
-
-_chachedPixelColorBitmaps = {}
 
 
 _paperSizes = {
@@ -140,6 +138,8 @@ class DrawBotDrawingTool(object):
             self._hasPage = False
             if not hasattr(self, "_tempInstalledFonts"):
                 self._tempInstalledFonts = dict()
+        self._cachedPixelColorBitmaps = {}
+        clearMemoizeCache()
 
     def _copy(self):
         new = self.__class__()
@@ -294,6 +294,9 @@ class DrawBotDrawingTool(object):
             width, height = _paperSizes[width]
         if width == "screen":
             width, height = AppKit.NSScreen.mainScreen().frame().size
+        if width is None and height is None:
+            width = self._width
+            height = self._height
         self._width = width
         self._height = height
         self._hasPage = True
@@ -477,7 +480,7 @@ class DrawBotDrawingTool(object):
 
     def save(self):
         """
-        Obsolete: use `savedState()` in a `with` statement instead.
+        DrawBot strongly recommends to use `savedState()` in a `with` statement instead.
 
         Save the current graphics state.
         This will save the state of the canvas (with all the transformations)
@@ -489,7 +492,7 @@ class DrawBotDrawingTool(object):
 
     def restore(self):
         """
-        Obsolete: use `savedState()` in a `with` statement instead.
+        DrawBot strongly recommends to use `savedState()` in a `with` statement instead.
 
         Restore from a previously saved graphics state.
         This will restore the state of the canvas (with all the transformations)
@@ -586,6 +589,13 @@ class DrawBotDrawingTool(object):
         x3, y3 = xy3
         self._requiresNewFirstPage = True
         self._addInstruction("curveTo", (x1, y1), (x2, y2), (x3, y3))
+
+    def qCurveTo(self, *points):
+        """
+        Quadratic curve with a given set of off curves to a on curve.
+        """
+        self._requiresNewFirstPage = True
+        self._addInstruction("qCurveTo", points)
 
     def arc(self, center, radius, startAngle, endAngle, clockwise):
         """
@@ -1503,8 +1513,9 @@ class DrawBotDrawingTool(object):
             # draw the same string
             text("aabcde1234567890", (100, 100))
         """
-        self._dummyContext.openTypeFeatures(*args, **features)
+        result = self._dummyContext.openTypeFeatures(*args, **features)
         self._addInstruction("openTypeFeatures", *args, **features)
+        return result
 
     def listOpenTypeFeatures(self, fontName=None):
         """
@@ -1537,8 +1548,9 @@ class DrawBotDrawingTool(object):
             # draw text!!
             text("Hello Q", (100, 300))
         """
-        self._dummyContext.fontVariations(*args, **axes)
+        result = self._dummyContext.fontVariations(*args, **axes)
         self._addInstruction("fontVariations", *args, **axes)
+        return result
 
     def listFontVariations(self, fontName=None):
         """
@@ -1944,7 +1956,7 @@ class DrawBotDrawingTool(object):
         x, y = xy
         if isinstance(path, basestring):
             path = optimizePath(path)
-        bitmap = _chachedPixelColorBitmaps.get(path)
+        bitmap = self._cachedPixelColorBitmaps.get(path)
         if bitmap is None:
             if isinstance(path, self._imageClass):
                 source = path._nsImage()
@@ -1958,7 +1970,7 @@ class DrawBotDrawingTool(object):
                 source = AppKit.NSImage.alloc().initByReferencingURL_(url)
 
             bitmap = AppKit.NSBitmapImageRep.imageRepWithData_(source.TIFFRepresentation())
-            _chachedPixelColorBitmaps[path] = bitmap
+            self._cachedPixelColorBitmaps[path] = bitmap
 
         color = bitmap.colorAtX_y_(x, bitmap.pixelsHigh() - y - 1)
         if color is None:
@@ -1967,6 +1979,9 @@ class DrawBotDrawingTool(object):
         return color.redComponent(), color.greenComponent(), color.blueComponent(), color.alphaComponent()
 
     def numberOfPages(self, path):
+        """
+        Return the number of pages for a given pdf or (animated) gif.
+        """
         path = optimizePath(path)
         if path.startswith("http"):
             url = AppKit.NSURL.URLWithString_(path)
@@ -2126,6 +2141,8 @@ class DrawBotDrawingTool(object):
 
         psName = self._dummyContext._fontNameForPath(path)
         self._tempInstalledFonts[path] = psName
+        # also clear cached memoized functions
+        clearMemoizeCache()
 
         if not success:
             warnings.warn("install font: %s" % error)
