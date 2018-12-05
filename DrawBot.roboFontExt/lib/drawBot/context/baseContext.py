@@ -105,17 +105,41 @@ class BezierPath(BasePen):
 
     # pen support
 
-    def _moveTo(self, pt):
+    def moveTo(self, point):
         """
         Move to a point `x`, `y`.
         """
+        super(BezierPath, self).moveTo(point)
+
+    def _moveTo(self, pt):
         self._path.moveToPoint_(pt)
 
-    def _lineTo(self, pt):
+    def lineTo(self, point):
         """
         Line to a point `x`, `y`.
         """
+        super(BezierPath, self).lineTo(point)
+
+    def _lineTo(self, pt):
         self._path.lineToPoint_(pt)
+
+    def curveTo(self, *points):
+        """
+        Draw a cubic bezier with an arbitrary number of control points.
+
+        The last point specified is on-curve, all others are off-curve
+        (control) points.
+        """
+        super(BezierPath, self).curveTo(*points)
+
+    def qCurveTo(self, *points):
+        """
+        Draw a whole string of quadratic curve segments.
+
+        The last point specified is on-curve, all others are off-curve
+        (control) points.
+        """
+        super(BezierPath, self).qCurveTo(*points)
 
     def _curveToOne(self, pt1, pt2, pt3):
         """
@@ -132,31 +156,59 @@ class BezierPath(BasePen):
 
     def beginPath(self, identifier=None):
         """
-        Begin path.
+        Begin using the path as a so called point pen and start a new subpath.
         """
-        from ufoLib.pointPen import PointToSegmentPen
+        from fontTools.pens.pointPen import PointToSegmentPen
         self._pointToSegmentPen = PointToSegmentPen(self)
         self._pointToSegmentPen.beginPath()
 
-    def addPoint(self, *args, **kwargs):
+    def addPoint(self, point, segmentType=None, smooth=False, name=None, identifier=None, **kwargs):
         """
-        Add a point to the path.
+        Use the path as a point pen and add a point to the current subpath. `beginPath` must
+        have been called prior to adding points with `addPoint` calls.
         """
-        self._pointToSegmentPen.addPoint(*args, **kwargs)
+        if not hasattr(self, "_pointToSegmentPen"):
+            raise DrawBotError("path.beginPath() must be called before the path can be used as a point pen")
+        self._pointToSegmentPen.addPoint(
+            point,
+            segmentType=segmentType,
+            smooth=smooth,
+            name=name,
+            identifier=identifier,
+            **kwargs
+        )
 
     def endPath(self):
         """
-        End the path.
+        End the current subpath. Calling this method has two distinct meanings depending
+        on the context:
 
-        When the bezier path is used as a pen, the path will be open.
+        When the bezier path is used as a segment pen (using `moveTo`, `lineTo`, etc.),
+        the current subpath will be finished as an open contour.
 
-        When the bezier path is used as a point pen, the path will process all the points added with `addPoints`.
+        When the bezier path is used as a point pen (using `beginPath`, `addPoint` and
+        `endPath`), the path will process all the points added with `addPoint`, finishing
+        the current subpath.
         """
         if hasattr(self, "_pointToSegmentPen"):
             # its been uses in a point pen world
             pointToSegmentPen = self._pointToSegmentPen
             del self._pointToSegmentPen
             pointToSegmentPen.endPath()
+        else:
+            # with NSBezierPath, nothing special needs to be done for an open subpath.
+            pass
+
+    def addComponent(self, glyphName, transformation):
+        """
+        Add a sub glyph. The 'transformation' argument must be a 6-tuple
+        containing an affine transformation, or a Transform object from the
+        fontTools.misc.transform module. More precisely: it should be a
+        sequence containing 6 numbers.
+
+        A `glyphSet` is required during initialization of the BezierPath object.
+        """
+        super().addComponent(self, glyphName, transformation)
 
     def drawToPen(self, pen):
         """
@@ -1672,7 +1724,7 @@ class FormattedString(object):
             text(t, (100, 100))
         """
         # use a non breaking space as replacement character
-        baseString = unichr(0x00A0)
+        baseString = unichr(0xFFFD)
         font = None
         if self._font:
             font = AppKit.NSFont.fontWithName_size_(self._font, self._fontSize)
