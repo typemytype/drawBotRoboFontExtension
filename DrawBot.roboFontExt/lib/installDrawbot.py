@@ -31,7 +31,12 @@ def drawGlyph(glyph):
     if hasattr(glyph, "getRepresentation"):
         path = glyph.getRepresentation("defconAppKit.NSBezierPath")
     else:
-        pen = CocoaPen(glyph.getParent())
+        font = None
+        if hasattr(glyph, "font"):
+            font = glyph.font
+        elif hasattr(glyph, "getParent"):
+            font = glyph.getParent()
+        pen = CocoaPen(font)
         glyph.draw(pen)
         path = pen.path
     _drawBotDrawingTool.drawPath(path)
@@ -46,7 +51,12 @@ class RFBezierPath(glyphContext.GlyphBezierPath):
         if hasattr(glyph, "getRepresentation"):
             path = glyph.getRepresentation("defconAppKit.NSBezierPath")
         else:
-            pen = CocoaPen(glyph.getParent())
+            font = None
+            if hasattr(glyph, "font"):
+                font = glyph.font
+            elif hasattr(glyph, "getParent"):
+                font = glyph.getParent()
+            pen = CocoaPen(font)
             glyph.draw(pen)
             path = pen.path
         self.getNSBezierPath().appendBezierPath_(path)
