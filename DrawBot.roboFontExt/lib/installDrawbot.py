@@ -21,9 +21,11 @@ sys.path.append(root)
 gifsiclePath = os.path.join(root, "drawBot", "context", "tools", "gifsicle")
 potrace = os.path.join(root, "drawBot", "context", "tools", "potrace")
 mkbitmap = os.path.join(root, "drawBot", "context", "tools", "mkbitmap")
+ffmpeg = os.path.join(root, "drawBot", "context", "tools", "ffmpeg")
 os.chmod(gifsiclePath, 0o0755)
 os.chmod(potrace, 0o0755)
 os.chmod(mkbitmap, 0o0755)
+os.chmod(ffmpeg, 0o0755)
 
 
 # add a drawGlyph callback
