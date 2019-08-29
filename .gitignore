@@ -1,3 +1,4 @@
 *.py[cod]
 
 copyFromMaster.py
+.DS_Store
