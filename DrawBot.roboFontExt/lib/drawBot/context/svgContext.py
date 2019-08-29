@@ -1,6 +1,3 @@
-from __future__ import absolute_import
-
-from fontTools.misc.py23 import round
 import AppKit
 import CoreText
 
@@ -411,7 +408,8 @@ class SVGContext(BaseContext):
                 stringRange = CoreText.CTRunGetStringRange(ctRun)
                 attributes = CoreText.CTRunGetAttributes(ctRun)
                 font = attributes.get(AppKit.NSFontAttributeName)
-                fontAttributes = font.fontDescriptor().fontAttributes()
+                fontDescriptor = font.fontDescriptor()
+                fontAttributes = fontDescriptor.fontAttributes()
                 fillColor = attributes.get(AppKit.NSForegroundColorAttributeName)
                 strokeColor = attributes.get(AppKit.NSStrokeColorAttributeName)
                 strokeWidth = attributes.get(AppKit.NSStrokeWidthAttributeName, self._state.strokeWidth)
@@ -420,6 +418,8 @@ class SVGContext(BaseContext):
 
                 fontName = font.fontName()
                 fontSize = font.pointSize()
+                fontFallbacks = [fallbackFont.postscriptName() for fallbackFont in fontDescriptor.get(CoreText.NSFontCascadeListAttribute, [])]
+                fontNames = ", ".join([fontName] + fontFallbacks)
 
                 spanData = dict(defaultData)
                 fill = self._colorClass(fillColor).svgColor()
@@ -435,7 +435,7 @@ class SVGContext(BaseContext):
                     if a != 1:
                         spanData["stroke-opacity"] = a
                     spanData["stroke-width"] = formatNumber(abs(strokeWidth) * .5)
-                spanData["font-family"] = fontName
+                spanData["font-family"] = fontNames
                 spanData["font-size"] = formatNumber(fontSize)
 
                 if openTypeFeatures:

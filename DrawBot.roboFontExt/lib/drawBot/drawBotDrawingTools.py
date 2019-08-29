@@ -1,5 +1,3 @@
-from __future__ import absolute_import
-
 import AppKit
 import CoreText
 import Quartz
@@ -17,8 +15,6 @@ from .context.tools import gifTools
 from .context.tools import openType
 
 from .misc import DrawBotError, warnings, VariableController, optimizePath, isPDF, isEPS, isGIF, transformationAtCenter, clearMemoizeCache
-
-from fontTools.misc.py23 import basestring, PY2
 
 
 def _getmodulecontents(module, names=None):
@@ -99,7 +95,7 @@ class DrawBotDrawingTool(object):
 
     def _addToNamespace(self, namespace):
         namespace.update(_getmodulecontents(self, self.__all__))
-        namespace.update(_getmodulecontents(random, ["random", "randint", "choice"]))
+        namespace.update(_getmodulecontents(random, ["random", "randint", "choice", "shuffle"]))
         namespace.update(_getmodulecontents(math))
 
     def _addInstruction(self, callback, *args, **kwargs):
@@ -364,7 +360,7 @@ class DrawBotDrawingTool(object):
         All supported file extensions: %(supporttedExtensions)s.
         (`*` will print out all actions.)
 
-        When exporting an animation or movie, each page represents a frame.
+        When exporting an animation or movie, each page represents a frame and the framerate is set by calling `frameDuration()` after each `newPage()`.
 
         .. downloadcode:: saveImage.py
 
@@ -607,6 +603,37 @@ class DrawBotDrawingTool(object):
     def arcTo(self, xy1, xy2, radius):
         """
         Arc from one point to an other point with a given `radius`.
+
+        .. downloadcode:: arcTo-example.py
+
+            pt0 = 74, 48
+            pt1 = 238, 182
+            pt2 = 46, 252
+            radius = 60
+
+            def drawPt(pos, r=5):
+                x, y = pos
+                oval(x-r, y-r, r*2, r*2)
+
+            size(300, 300)
+            fill(None)
+
+            path = BezierPath()
+            path.moveTo(pt0)
+            path.arcTo(pt1, pt2, radius)
+
+            stroke(0, 1, 1)
+            polygon(pt0, pt1, pt2)
+            for pt in [pt0, pt1, pt2]:
+                drawPt(pt)
+
+            stroke(0, 0, 1)
+            drawPath(path)
+            stroke(1, 0, 1)
+            for pt in path.onCurvePoints:
+                drawPt(pt, r=3)
+            for pt in path.offCurvePoints:
+                drawPt(pt, r=2)
         """
         x1, y1 = xy1
         x2, y2 = xy2
@@ -1518,12 +1545,9 @@ class DrawBotDrawingTool(object):
         return result
 
     def listOpenTypeFeatures(self, fontName=None):
-        """
-        List all OpenType feature tags for the current font.
-
-        Optionally a `fontName` can be given. If a font path is given the font will be installed and used directly.
-        """
         return self._dummyContext._state.text.listOpenTypeFeatures(fontName)
+
+    listOpenTypeFeatures.__doc__ = FormattedString.listFontVariations.__doc__
 
     def fontVariations(self, *args, **axes):
         """
@@ -1553,12 +1577,14 @@ class DrawBotDrawingTool(object):
         return result
 
     def listFontVariations(self, fontName=None):
-        """
-        List all variation axes for the current font.
-
-        Optionally a `fontName` can be given. If a font path is given the font will be installed and used directly.
-        """
         return self._dummyContext._state.text.listFontVariations(fontName)
+
+    listFontVariations.__doc__ = FormattedString.listFontVariations.__doc__
+
+    def listNamedInstances(self, fontName=None):
+        return self._dummyContext._state.text.listNamedInstances(fontName)
+
+    listNamedInstances.__doc__ = FormattedString.listNamedInstances.__doc__
 
     # drawing text
 
@@ -1581,11 +1607,8 @@ class DrawBotDrawingTool(object):
             text("hallo", (200, 600))
             text("I'm Times", (100, 300))
         """
-        if PY2 and isinstance(txt, basestring):
-            try:
-                txt = txt.decode("utf-8")
-            except UnicodeEncodeError:
-                pass
+        if not isinstance(txt, (str, FormattedString)):
+            raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         if y is None:
             x, y = x
         else:
@@ -1624,13 +1647,10 @@ class DrawBotDrawingTool(object):
         Optionally `txt` can be a `FormattedString`.
         Optionally `box` can be a `BezierPath`.
         """
-        if PY2 and isinstance(txt, basestring):
-            try:
-                txt = txt.decode("utf-8")
-            except UnicodeEncodeError:
-                pass
         if isinstance(txt, self._formattedStringClass):
             txt = txt.copy()
+        elif not isinstance(txt, (str, FormattedString)):
+            raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         if align is None:
             align = "left"
         elif align not in self._dummyContext._textAlignMap.keys():
@@ -1765,11 +1785,8 @@ class DrawBotDrawingTool(object):
             # draw some text in the path
             textBox("abcdefghijklmnopqrstuvwxyz"*30000, path)
         """
-        if PY2 and isinstance(txt, basestring):
-            try:
-                txt = txt.decode("utf-8")
-            except UnicodeEncodeError:
-                pass
+        if not isinstance(txt, (str, FormattedString)):
+            raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         if align is None:
             align = "left"
         elif align not in self._dummyContext._textAlignMap.keys():
@@ -1789,11 +1806,8 @@ class DrawBotDrawingTool(object):
         Optionally an alignment can be set.
         Possible `align` values are: `"left"`, `"center"`, `"right"` and `"justified"`.
         """
-        if PY2 and isinstance(txt, basestring):
-            try:
-                txt = txt.decode("utf-8")
-            except UnicodeEncodeError:
-                pass
+        if not isinstance(txt, (str, FormattedString)):
+            raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         path, (x, y) = self._dummyContext._getPathForFrameSetter(box)
         attrString = self._dummyContext.attributedString(txt)
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
@@ -1861,7 +1875,7 @@ class DrawBotDrawingTool(object):
         """
         if isinstance(path, self._imageClass):
             path = path._nsImage()
-        if isinstance(path, basestring):
+        if isinstance(path, str):
             path = optimizePath(path)
         self._requiresNewFirstPage = True
         self._addInstruction("image", path, position, alpha, pageNumber)
@@ -1884,7 +1898,7 @@ class DrawBotDrawingTool(object):
             # its an NSImage
             rep = path
         else:
-            if isinstance(path, basestring):
+            if isinstance(path, str):
                 path = optimizePath(path)
             if path.startswith("http"):
                 url = AppKit.NSURL.URLWithString_(path)
@@ -1954,7 +1968,7 @@ class DrawBotDrawingTool(object):
                         text("W", (x, y))
         """
         x, y = xy
-        if isinstance(path, basestring):
+        if isinstance(path, str):
             path = optimizePath(path)
         bitmap = self._cachedPixelColorBitmaps.get(path)
         if bitmap is None:
@@ -1992,7 +2006,7 @@ class DrawBotDrawingTool(object):
             # get the bitmap representation
             rep = reps[0]
         else:
-            if isinstance(path, basestring):
+            if isinstance(path, str):
                 path = optimizePath(path)
             if path.startswith("http"):
                 url = AppKit.NSURL.URLWithString_(path)
@@ -2112,11 +2126,8 @@ class DrawBotDrawingTool(object):
         Optionally a `width` constrain or `height` constrain can be provided
         to calculate the lenght or width of text with the given constrain.
         """
-        if PY2 and isinstance(txt, basestring):
-            try:
-                txt = txt.decode("utf-8")
-            except UnicodeEncodeError:
-                pass
+        if not isinstance(txt, (str, FormattedString)):
+            raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         if width is not None and height is not None:
             raise DrawBotError("Calculating textSize can only have one constrain, either width or height must be None")
         return self._dummyContext.textSize(txt, align, width, height)

@@ -1,6 +1,3 @@
-from fontTools.misc.py23 import *
-from fontTools.misc.py23 import PY2, PY3
-
 import sys
 import traceback
 
@@ -14,11 +11,6 @@ class StdOutput(object):
         self.isError = isError
 
     def write(self, data):
-        if PY2 and isinstance(data, str):
-            try:
-                data = unicode(data, "utf-8", "replace")
-            except UnicodeDecodeError:
-                data = "XXX " + repr(data)
         self.data.append((data, self.isError))
 
     def flush(self):
