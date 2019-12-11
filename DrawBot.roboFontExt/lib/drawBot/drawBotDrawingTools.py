@@ -7,7 +7,7 @@ import os
 import random
 
 from .context import getContextForFileExt, getContextOptions, getFileExtensions, getContextOptionsDocs
-from .context.baseContext import BezierPath, FormattedString
+from .context.baseContext import BezierPath, FormattedString, makeTextBoxes
 from .context.dummyContext import DummyContext
 
 from .context.tools.imageObject import ImageObject
@@ -720,8 +720,7 @@ class DrawBotDrawingTool(object):
             line((100, 100), (900, 900))
         """
         path = self._bezierPathClass()
-        path.moveTo(point1)
-        path.lineTo(point2)
+        path.line(point1, point2)
         self.drawPath(path)
 
     def polygon(self, *points, **kwargs):
@@ -735,18 +734,8 @@ class DrawBotDrawingTool(object):
             # draw a polygon with x-amount of points
             polygon((100, 100), (100, 900), (900, 900), (200, 800), close=True)
         """
-        if len(points) <= 1:
-            raise TypeError("polygon() expects more than a single point")
-        doClose = kwargs.get("close", True)
-        if (len(kwargs) == 1 and "close" not in kwargs) or len(kwargs) > 1:
-            raise TypeError("unexpected keyword argument for this function")
-
         path = self._bezierPathClass()
-        path.moveTo(points[0])
-        for x, y in points[1:]:
-            path.lineTo((x, y))
-        if doClose:
-            path.closePath()
+        path.polygon(*points, **kwargs)
         self.drawPath(path)
 
     # color
@@ -1478,6 +1467,8 @@ class DrawBotDrawingTool(object):
 
         Support is depending on local OS.
 
+        `language()` will activate the `locl` OpenType features, if supported by the current font.
+
         .. downloadcode:: language.py
 
             size(1000, 600)
@@ -1530,7 +1521,7 @@ class DrawBotDrawingTool(object):
 
             size(1000, 300)
             # set a font
-            font("ACaslonPro-Regular")
+            font("Didot")
             # set the font size
             fontSize(50)
             # draw a string
@@ -1588,7 +1579,7 @@ class DrawBotDrawingTool(object):
 
     # drawing text
 
-    def text(self, txt, x, y=None, align=None):
+    def text(self, txt, position, align=None):
         """
         Draw a text at a provided position.
 
@@ -1609,29 +1600,12 @@ class DrawBotDrawingTool(object):
         """
         if not isinstance(txt, (str, FormattedString)):
             raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
-        if y is None:
-            x, y = x
-        else:
-            warnings.warn("position must a tuple: text('%s', (%s, %s))" % (txt, x, y))
-        if align is None:
-            align = "left"
-        elif align not in ("left", "center", "right"):
+        x, y = position
+        if align not in ("left", "center", "right", None):
             raise DrawBotError("align must be left, right, center")
-        attrString = self._dummyContext.attributedString(txt, align=align)
-        w, h = attrString.size()
-        if align == "right":
-            x -= w
-        elif align == "center":
-            x -= w * .5
-        setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
-        path = Quartz.CGPathCreateMutable()
-        Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(x, y, w, h * 2))
-        box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
-        ctLines = CoreText.CTFrameGetLines(box)
-        origins = CoreText.CTFrameGetLineOrigins(box, (0, len(ctLines)), None)
-        if origins:
-            y -= origins[0][1]
-        self.textBox(txt, (x, y, w, h * 2), align=align)
+        attributedString = self._dummyContext.attributedString(txt, align=align)
+        for subTxt, box in makeTextBoxes(attributedString, (x, y), align=align, plainText=not isinstance(txt, FormattedString)):
+            self.textBox(subTxt, box, align=align)
 
     def textOverflow(self, txt, box, align=None):
         """
@@ -1846,9 +1820,9 @@ class DrawBotDrawingTool(object):
             txt = FormattedString()
 
             # adding some text with some formatting
-            txt.append("hello", font="ACaslonPro-Regular", fontSize=50)
+            txt.append("hello", font="Didot", fontSize=50)
             # adding more text with an
-            txt.append("world", font="ACaslonPro-Regular", fontSize=50, openTypeFeatures=dict(smcp=True))
+            txt.append("world", font="Didot", fontSize=50, openTypeFeatures=dict(smcp=True))
 
             text(txt, (10, 150))
 
@@ -1871,7 +1845,7 @@ class DrawBotDrawingTool(object):
         .. downloadcode:: image.py
 
             # the path can be a path to a file or a url
-            image("http://f.cl.ly/items/1T3x1y372J371p0v1F2Z/drawBot.jpg", (100, 100), alpha=.3)
+            image("https://d1sz9tkli0lfjq.cloudfront.net/items/1T3x1y372J371p0v1F2Z/drawBot.jpg", (100, 100), alpha=.3)
         """
         if isinstance(path, self._imageClass):
             path = path._nsImage()
@@ -1886,7 +1860,7 @@ class DrawBotDrawingTool(object):
 
         .. downloadcode:: imageSize.py
 
-            print(imageSize("http://f.cl.ly/items/1T3x1y372J371p0v1F2Z/drawBot.jpg"))
+            print(imageSize("https://d1sz9tkli0lfjq.cloudfront.net/items/1T3x1y372J371p0v1F2Z/drawBot.jpg"))
         """
         if isinstance(path, self._imageClass):
             # its an drawBot.ImageObject, just return the size from that obj
@@ -1939,7 +1913,7 @@ class DrawBotDrawingTool(object):
         .. downloadcode:: pixelColor.py
 
             # path to the image
-            path = u"http://f.cl.ly/items/1T3x1y372J371p0v1F2Z/drawBot.jpg"
+            path = u"https://d1sz9tkli0lfjq.cloudfront.net/items/1T3x1y372J371p0v1F2Z/drawBot.jpg"
 
             # get the size of the image
             w, h = imageSize(path)

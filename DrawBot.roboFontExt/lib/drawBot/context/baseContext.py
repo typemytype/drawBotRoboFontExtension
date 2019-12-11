@@ -8,13 +8,24 @@ import os
 from fontTools.pens.basePen import BasePen
 
 from drawBot.misc import DrawBotError, cmyk2rgb, warnings, transformationAtCenter
+from drawBot.macOSVersion import macOSVersion
 
 from .tools import openType
 from .tools import variation
+from .tools import SFNTLayoutTypes
 
 
 _FALLBACKFONT = "LucidaGrande"
-
+_LINEJOINSTYLESMAP = dict(
+    miter=Quartz.kCGLineJoinMiter,
+    round=Quartz.kCGLineJoinRound,
+    bevel=Quartz.kCGLineJoinBevel
+)
+_LINECAPSTYLESMAP = dict(
+    butt=Quartz.kCGLineCapButt,
+    square=Quartz.kCGLineCapSquare,
+    round=Quartz.kCGLineCapRound,
+)
 
 def _tryInstallFontFromFontName(fontName):
     from drawBot.drawBotDrawingTools import _drawBotDrawingTool
@@ -250,6 +261,31 @@ class BezierPath(BasePen):
         self._path.appendBezierPathWithOvalInRect_(((x, y), (w, h)))
         self.closePath()
 
+    def line(self, point1, point2):
+        """
+        Add a line between two given points.
+        """
+        self.moveTo(point1)
+        self.lineTo(point2)
+
+    def polygon(self, *points, **kwargs):
+        """
+        Draws a polygon with n-amount of points.
+        Optionally a `close` argument can be provided to open or close the path.
+        As default a `polygon` is a closed path.
+        """
+        if len(points) <= 1:
+            raise TypeError("polygon() expects more than a single point")
+        doClose = kwargs.get("close", True)
+        if (len(kwargs) == 1 and "close" not in kwargs) or len(kwargs) > 1:
+            raise TypeError("unexpected keyword argument for this function")
+
+        self.moveTo(points[0])
+        for x, y in points[1:]:
+            self.lineTo((x, y))
+        if doClose:
+            self.closePath()
+
     def text(self, txt, offset=None, font=_FALLBACKFONT, fontSize=10, align=None):
         """
         Draws a `txt` with a `font` and `fontSize` at an `offset` in the bezier path.
@@ -266,28 +302,16 @@ class BezierPath(BasePen):
             raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         if align and align not in BaseContext._textAlignMap.keys():
             raise DrawBotError("align must be %s" % (", ".join(BaseContext._textAlignMap.keys())))
+
         context = BaseContext()
         context.font(font, fontSize)
-
         attributedString = context.attributedString(txt, align)
-        w, h = attributedString.size()
         if offset:
             x, y = offset
         else:
             x = y = 0
-        if align == "right":
-            x -= w
-        elif align == "center":
-            x -= w * .5
-        setter = CoreText.CTFramesetterCreateWithAttributedString(attributedString)
-        path = Quartz.CGPathCreateMutable()
-        Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(x, y, w, h))
-        frame = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
-        ctLines = CoreText.CTFrameGetLines(frame)
-        origins = CoreText.CTFrameGetLineOrigins(frame, (0, len(ctLines)), None)
-        if origins:
-            y -= origins[0][1]
-        self.textBox(txt, box=(x, y - h, w, h * 2), font=font, fontSize=fontSize, align=align)
+        for subTxt, box in makeTextBoxes(attributedString, (x, y), align=align, plainText=not isinstance(txt, FormattedString)):
+            self.textBox(subTxt, box, font=font, fontSize=fontSize, align=align)
 
     def textBox(self, txt, box, font=_FALLBACKFONT, fontSize=10, align=None, hyphenation=None):
         """
@@ -377,14 +401,22 @@ class BezierPath(BasePen):
                 )
             elif instruction == AppKit.NSClosePathBezierPathElement:
                 Quartz.CGPathCloseSubpath(path)
-        # hacking to get a proper close path at the end of the path
-        x, y, _, _ = self.bounds()
-        Quartz.CGPathMoveToPoint(path, None, x, y)
-        Quartz.CGPathAddLineToPoint(path, None, x, y)
-        Quartz.CGPathAddLineToPoint(path, None, x, y)
-        Quartz.CGPathAddLineToPoint(path, None, x, y)
-        Quartz.CGPathCloseSubpath(path)
         return path
+
+    def _setCGPath(self, cgpath):
+        self._path = AppKit.NSBezierPath.alloc().init()
+
+        def _addPoints(arg, element):
+            instruction, points = element.type, element.points
+            if instruction == Quartz.kCGPathElementMoveToPoint:
+                self._path.moveToPoint_(points[0])
+            elif instruction == Quartz.kCGPathElementAddLineToPoint:
+                self._path.lineToPoint_(points[0])
+            elif instruction == Quartz.kCGPathElementAddCurveToPoint:
+                self._path.curveToPoint_controlPoint1_controlPoint2_(points[2], points[0], points[1])
+            elif instruction == Quartz.kCGPathElementCloseSubpath:
+                self._path.closePath()
+        Quartz.CGPathApply(cgpath, None, _addPoints)
 
     def setNSBezierPath(self, path):
         """
@@ -594,6 +626,26 @@ class BezierPath(BasePen):
             assert isinstance(other, self.__class__)
             contours += other._contoursForBooleanOperations()
         return booleanOperations.getIntersections(contours)
+
+    def expandStroke(self, width, lineCap="round", lineJoin="round", miterLimit=10):
+        """
+        Returns a new bezier path with an expanded stroke around the original path,
+        with a given `width`. Note: the new path will not contain the original path.
+
+        The following optional arguments are available with respect to line caps and joins:
+        * `lineCap`: Possible values are `"butt"`, `"square"` or `"round"`
+        * `lineJoin`: Possible values are `"bevel"`, `"miter"` or `"round"`
+        * `miterLimit`: The miter limit to use for `"miter"` lineJoin option
+        """
+        if lineJoin not in _LINEJOINSTYLESMAP:
+            raise DrawBotError("lineJoin must be 'bevel', 'miter' or 'round'")
+        if lineCap not in _LINECAPSTYLESMAP:
+            raise DrawBotError("lineCap must be 'butt', 'square' or 'round'")
+
+        strokedCGPath = Quartz.CGPathCreateCopyByStrokingPath(self._getCGPath(), None, width, _LINECAPSTYLESMAP[lineCap], _LINEJOINSTYLESMAP[lineJoin], miterLimit)
+        result = self.__class__()
+        result._setCGPath(strokedCGPath)
+        return result
 
     def __mod__(self, other):
         return self.difference(other)
@@ -823,6 +875,73 @@ class Gradient(object):
         return new
 
 
+def makeTextBoxes(attributedString, xy, align, plainText):
+    extraPadding = 20
+    x, y = xy
+    w, h = attributedString.size()
+    w += extraPadding
+
+    if align is not None:
+        attributedString = attributedString.mutableCopy()
+        # overwrite all align settings in each paragraph style
+        def block(value, rng, stop):
+            value = value.mutableCopy()
+            value.setAlignment_(FormattedString._textAlignMap[align])
+            attributedString.addAttribute_value_range_(AppKit.NSParagraphStyleAttributeName, value, rng)
+        attributedString.enumerateAttribute_inRange_options_usingBlock_(AppKit.NSParagraphStyleAttributeName, (0, len(attributedString)), 0, block)
+
+    setter = CoreText.CTFramesetterCreateWithAttributedString(attributedString)
+    path = Quartz.CGPathCreateMutable()
+    Quartz.CGPathAddRect(path, None, Quartz.CGRectMake(x, y, w, h * 2))
+    frame = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
+    ctLines = CoreText.CTFrameGetLines(frame)
+    origins = CoreText.CTFrameGetLineOrigins(frame, (0, len(ctLines)), None)
+    boxes = []
+
+    for ctLine, (originX, originY) in zip(ctLines, origins):
+        rng = CoreText.CTLineGetStringRange(ctLine)
+
+        attributedSubstring = attributedString.attributedSubstringFromRange_(rng)
+        para, _ = attributedSubstring.attribute_atIndex_effectiveRange_(AppKit.NSParagraphStyleAttributeName, 0, None)
+        # strip trailing returns
+        if attributedSubstring.string()[-1] in ["\n", "\r"]:
+            attributedSubstring = attributedSubstring.mutableCopy()
+            if rng.length == 1:
+                # Apart from the newline, the string is empty, which will give us the wrong
+                # height. First replace the newline with a space, then measure the height,
+                # then strip the space. The width is zero for an empty string.
+                attributedSubstring.replaceCharactersInRange_withString_((rng.length - 1, 1), " ")
+                _, height = attributedSubstring.size()
+                width = 0  # width is zero, but is not used as we're skipping making a box for an empty string.
+                attributedSubstring.deleteCharactersInRange_((rng.length - 1, 1))
+                assert attributedSubstring.length() == 0
+            else:
+                attributedSubstring.deleteCharactersInRange_((rng.length - 1, 1))
+                width, height = attributedSubstring.size()
+        else:
+            width, height = attributedSubstring.size()
+        if attributedSubstring.length() > 0:
+            width += extraPadding
+            originX = 0
+            if para.alignment() == AppKit.NSCenterTextAlignment:
+                originX -= width * .5
+            elif para.alignment() == AppKit.NSRightTextAlignment:
+                originX = -width
+
+            substring = FormattedString()
+            substring.getNSObject().appendAttributedString_(attributedSubstring)
+
+            if plainText:
+                substring = str(substring)
+
+            box = (x + originX, y - originY, width, h * 2)
+            boxes.append((substring, box))
+
+        y -= height * 2
+
+    return boxes
+
+
 class FormattedString(object):
 
     """
@@ -1009,24 +1128,26 @@ class FormattedString(object):
                     ff = _FALLBACKFONT
                 warnings.warn("font: '%s' is not installed, back to the fallback font: '%s'" % (self._font, ff))
                 font = AppKit.NSFont.fontWithName_size_(ff, self._fontSize)
-            coreTextfeatures = []
+            coreTextFontFeatures = []
+            nsFontFeatures = []  # fallback for macOS < 10.13
             if self._openTypeFeatures:
                 existingOpenTypeFeatures = openType.getFeatureTagsForFontName(self._font)
                 # sort features by their on/off state
                 # set all disabled features first
                 orderedOpenTypeFeatures = sorted(self._openTypeFeatures.items(), key=lambda kv: kv[1])
                 for featureTag, value in orderedOpenTypeFeatures:
-                    coreTextFeatureTag = featureTag
+                    if value and featureTag not in existingOpenTypeFeatures:
+                        # only warn when the feature is on and not existing for the current font
+                        warnings.warn("OpenType feature '%s' not available for '%s'" % (featureTag, self._font))
+                    feature = dict(CTFeatureOpenTypeTag=featureTag, CTFeatureOpenTypeValue=value)
+                    coreTextFontFeatures.append(feature)
+                    # The next lines are a fallback for macOS < 10.13
+                    nsFontFeatureTag = featureTag
                     if not value:
-                        coreTextFeatureTag = "%s_off" % featureTag
-                    if coreTextFeatureTag in openType.featureMap:
-                        if value and featureTag not in existingOpenTypeFeatures:
-                            # only warn when the feature is on and not existing for the current font
-                            warnings.warn("OpenType feature '%s' not available for '%s'" % (featureTag, self._font))
-                        feature = openType.featureMap[coreTextFeatureTag]
-                        coreTextfeatures.append(feature)
-                    else:
-                        warnings.warn("OpenType feature '%s' not available" % (featureTag))
+                        nsFontFeatureTag = "%s_off" % featureTag
+                    if nsFontFeatureTag in SFNTLayoutTypes.featureMap:
+                        feature = SFNTLayoutTypes.featureMap[nsFontFeatureTag]
+                        nsFontFeatures.append(feature)
             coreTextFontVariations = dict()
             if self._fontVariations:
                 existingAxes = variation.getVariationAxesForFontName(self._font)
@@ -1042,8 +1163,11 @@ class FormattedString(object):
                     else:
                         warnings.warn("variation axis '%s' not available for '%s'" % (axis, self._font))
             fontAttributes = {}
-            if coreTextfeatures:
-                fontAttributes[CoreText.NSFontFeatureSettingsAttribute] = coreTextfeatures
+            if coreTextFontFeatures:
+                fontAttributes[CoreText.kCTFontFeatureSettingsAttribute] = coreTextFontFeatures
+                if macOSVersion < "10.13":
+                    # fallback for macOS < 10.13:
+                    fontAttributes[CoreText.NSFontFeatureSettingsAttribute] = nsFontFeatures
             if coreTextFontVariations:
                 fontAttributes[CoreText.NSFontVariationAttribute] = coreTextFontVariations
             if self._fallbackFont:
@@ -1075,7 +1199,10 @@ class FormattedString(object):
             # Supply a negative value for NSStrokeWidthAttributeName
             # when you wish to draw a string that is both filled and stroked.
             # see https://developer.apple.com/library/content/qa/qa1531/_index.html
-            attributes[AppKit.NSStrokeWidthAttributeName] = -abs(self._strokeWidth)
+            # The stroke weight scales with the font size, where it matches the value
+            # at 100 points. Our value should not scale with the font size, so we
+            # compensate by multiplying by 100 and dividing by the font size.
+            attributes[AppKit.NSStrokeWidthAttributeName] = -abs(100 * self._strokeWidth / self._fontSize)
         para = AppKit.NSMutableParagraphStyle.alloc().init()
         if self._align:
             para.setAlignment_(self._textAlignMap[self._align])
@@ -1324,13 +1451,13 @@ class FormattedString(object):
             # create an empty formatted string object
             t = FormattedString()
             # set a font
-            t.font("ACaslonPro-Regular")
+            t.font("Didot")
             # set a font size
             t.fontSize(60)
             # add some text
             t += "0123456789 Hello"
             # enable some open type features
-            t.openTypeFeatures(smcp=True, lnum=True)
+            t.openTypeFeatures(smcp=True, onum=True)
             # add some text
             t += " 0123456789 Hello"
             # draw the formatted string
@@ -1349,9 +1476,7 @@ class FormattedString(object):
             if features.pop("resetFeatures", False):
                 self._openTypeFeatures.clear()
             self._openTypeFeatures.update(features)
-        currentFeatures = self.listOpenTypeFeatures()
-        currentFeatures.update(self._openTypeFeatures)
-        return currentFeatures
+        return dict(self._openTypeFeatures)
 
     def listOpenTypeFeatures(self, fontName=None):
         """
@@ -1541,6 +1666,8 @@ class FormattedString(object):
     def language(self, language):
         """
         Set the preferred language as language tag or None to use the default language.
+
+        `language()` will activate the `locl` OpenType features, if supported by the current font.
         """
         self._language = language
 
@@ -1752,7 +1879,7 @@ class FormattedString(object):
         # disable calt features, as this seems to be on by default
         # for both the font stored in the nsGlyphInfo as in the replacement character
         fontAttributes = {}
-        fontAttributes[CoreText.NSFontFeatureSettingsAttribute] = [openType.featureMap["calt_off"]]
+        fontAttributes[CoreText.kCTFontFeatureSettingsAttribute] = [dict(CTFeatureOpenTypeTag="calt", CTFeatureOpenTypeValue=False)]
         fontDescriptor = font.fontDescriptor()
         fontDescriptor = fontDescriptor.fontDescriptorByAddingAttributes_(fontAttributes)
         font = AppKit.NSFont.fontWithDescriptor_size_(fontDescriptor, self._fontSize)
@@ -1853,18 +1980,6 @@ class BaseContext(object):
     fileExtensions = []
     saveImageOptions = []
     validateSaveImageOptions = True
-
-    _lineJoinStylesMap = dict(
-        miter=Quartz.kCGLineJoinMiter,
-        round=Quartz.kCGLineJoinRound,
-        bevel=Quartz.kCGLineJoinBevel
-    )
-
-    _lineCapStylesMap = dict(
-        butt=Quartz.kCGLineCapButt,
-        square=Quartz.kCGLineCapSquare,
-        round=Quartz.kCGLineCapRound,
-    )
 
     _textAlignMap = FormattedString._textAlignMap
     _textTabAlignMap = FormattedString._textTabAlignMap
@@ -2162,16 +2277,16 @@ class BaseContext(object):
     def lineJoin(self, join):
         if join is None:
             self._state.lineJoin = None
-        if join not in self._lineJoinStylesMap:
+        if join not in _LINEJOINSTYLESMAP:
             raise DrawBotError("lineJoin() argument must be 'bevel', 'miter' or 'round'")
-        self._state.lineJoin = self._lineJoinStylesMap[join]
+        self._state.lineJoin = _LINEJOINSTYLESMAP[join]
 
     def lineCap(self, cap):
         if cap is None:
             self._state.lineCap = None
-        if cap not in self._lineCapStylesMap:
+        if cap not in _LINECAPSTYLESMAP:
             raise DrawBotError("lineCap() argument must be 'butt', 'square' or 'round'")
-        self._state.lineCap = self._lineCapStylesMap[cap]
+        self._state.lineCap = _LINECAPSTYLESMAP[cap]
 
     def lineDash(self, dash):
         if dash[0] is None:
