@@ -27,9 +27,63 @@ _LINECAPSTYLESMAP = dict(
     round=Quartz.kCGLineCapRound,
 )
 
+
 def _tryInstallFontFromFontName(fontName):
     from drawBot.drawBotDrawingTools import _drawBotDrawingTool
     return _drawBotDrawingTool._tryInstallFontFromFontName(fontName)
+
+
+# context specific attributes
+
+class ContextPropertyMixin:
+
+    def copyContextProperties(self, other):
+        # loop over all base classes
+        for cls in self.__class__.__bases__:
+            func = getattr(cls, "_copyContextProperties", None)
+            if func is not None:
+                func(self, other)
+
+
+class contextProperty:
+
+    def __init__(self, doc, validator=None):
+        self.__doc__ = doc
+        if validator is not None:
+            validator = getattr(self, f"_{validator}")
+        self._validator = validator
+
+    def __set_name__(self, owner, name):
+        self.name = name
+
+    def __get__(self, obj, cls=None):
+        return obj.__dict__.get(self.name)
+
+    def __set__(self, obj, value):
+        if self._validator:
+            self._validator(value)
+        obj.__dict__[self.name] = value
+
+    def __delete__(self, obj):
+        obj.__dict__.pop(self.name, None)
+
+    def _stringValidator(self, value):
+        if value is None:
+            return
+        if not isinstance(value, str):
+            raise DrawBotError(f"'{self.name}' must be a string.")
+
+
+class SVGContextPropertyMixin:
+
+    svgID = contextProperty("The svg id, as a string.", "stringValidator")
+    svgClass = contextProperty("The svg class, as a string.", "stringValidator")
+    svgLink = contextProperty("The svg link, as a string.", "stringValidator")
+
+    def _copyContextProperties(self, other):
+        self.svgID = other.svgID
+        self.svgClass = other.svgClass
+        self.svgLink = other.svgLink
 
 
 class BezierContour(list):
@@ -82,12 +136,12 @@ class BezierContour(list):
             pen.closePath()
 
     def _get_points(self):
-        return [point for segment in self for point in segment]
+        return tuple([point for segment in self for point in segment])
 
-    points = property(_get_points, doc="Return a list of all the points making up this contour, regardless of whether they are on curve or off curve.")
+    points = property(_get_points, doc="Return an immutable list of all the points in the contour as point coordinate `(x, y)` tuples.")
 
 
-class BezierPath(BasePen):
+class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
 
     """
     A bezier path object, if you want to draw the same over and over again.
@@ -449,20 +503,21 @@ class BezierPath(BasePen):
 
     def optimizePath(self):
         count = self._path.elementCount()
-        if self._path.elementAtIndex_(count - 1) == AppKit.NSMoveToBezierPathElement:
-            optimizedPath = AppKit.NSBezierPath.alloc().init()
-            for i in range(count - 1):
-                instruction, points = self._path.elementAtIndex_associatedPoints_(i)
-                if instruction == AppKit.NSMoveToBezierPathElement:
-                    optimizedPath.moveToPoint_(*points)
-                elif instruction == AppKit.NSLineToBezierPathElement:
-                    optimizedPath.lineToPoint_(*points)
-                elif instruction == AppKit.NSCurveToBezierPathElement:
-                    p1, p2, p3 = points
-                    optimizedPath.curveToPoint_controlPoint1_controlPoint2_(p3, p1, p2)
-                elif instruction == AppKit.NSClosePathBezierPathElement:
-                    optimizedPath.closePath()
-            self._path = optimizedPath
+        if not count or self._path.elementAtIndex_(count - 1) != AppKit.NSMoveToBezierPathElement:
+            return
+        optimizedPath = AppKit.NSBezierPath.alloc().init()
+        for i in range(count - 1):
+            instruction, points = self._path.elementAtIndex_associatedPoints_(i)
+            if instruction == AppKit.NSMoveToBezierPathElement:
+                optimizedPath.moveToPoint_(*points)
+            elif instruction == AppKit.NSLineToBezierPathElement:
+                optimizedPath.lineToPoint_(*points)
+            elif instruction == AppKit.NSCurveToBezierPathElement:
+                p1, p2, p3 = points
+                optimizedPath.curveToPoint_controlPoint1_controlPoint2_(p3, p1, p2)
+            elif instruction == AppKit.NSClosePathBezierPathElement:
+                optimizedPath.closePath()
+        self._path = optimizedPath
 
     def copy(self):
         """
@@ -470,6 +525,7 @@ class BezierPath(BasePen):
         """
         new = self.__class__()
         new._path = self._path.copy()
+        new.copyContextProperties(self)
         return new
 
     def reverse(self):
@@ -698,22 +754,22 @@ class BezierPath(BasePen):
             elif not offCurve:
                 pts = pts[-1:]
             points.extend([(p.x, p.y) for p in pts])
-        return points
+        return tuple(points)
 
     def _get_points(self):
         return self._points()
 
-    points = property(_get_points, doc="Return a list of all points.")
+    points = property(_get_points, doc="Return an immutable list of all points in the BezierPath as point coordinate `(x, y)` tuples.")
 
     def _get_onCurvePoints(self):
         return self._points(offCurve=False)
 
-    onCurvePoints = property(_get_onCurvePoints, doc="Return a list of all on curve points.")
+    onCurvePoints = property(_get_onCurvePoints, doc="Return an immutable list of all on curve points in the BezierPath as point coordinate `(x, y)` tuples.")
 
     def _get_offCurvePoints(self):
         return self._points(onCurve=False)
 
-    offCurvePoints = property(_get_offCurvePoints, doc="Return a list of all off curve points.")
+    offCurvePoints = property(_get_offCurvePoints, doc="Return an immutable list of all off curve points in the BezierPath as point coordinate `(x, y)` tuples.")
 
     def _get_contours(self):
         contours = []
@@ -727,9 +783,9 @@ class BezierPath(BasePen):
                 contours[-1].append([(p.x, p.y) for p in pts])
         if len(contours) >= 2 and len(contours[-1]) == 1 and contours[-1][0] == contours[-2][0]:
             contours.pop()
-        return contours
+        return tuple(contours)
 
-    contours = property(_get_contours, doc="Return a list of contours with all point coordinates sorted in segments. A contour object has an `open` attribute.")
+    contours = property(_get_contours, doc="Return an immutable list of contours with all point coordinates sorted in segments. A contour object has an `open` attribute.")
 
     def __len__(self):
         return len(self.contours)
@@ -942,7 +998,7 @@ def makeTextBoxes(attributedString, xy, align, plainText):
     return boxes
 
 
-class FormattedString(object):
+class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
 
     """
     FormattedString is a reusable object, if you want to draw the same over and over again.
@@ -1687,6 +1743,7 @@ class FormattedString(object):
         attributes = {key: getattr(self, "_%s" % key) for key in self._formattedAttributes}
         new = self.__class__(**attributes)
         new._attributedString = self._attributedString.mutableCopy()
+        new.copyContextProperties(self)
         return new
 
     def fontContainsCharacters(self, characters):
