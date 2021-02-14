@@ -5,6 +5,7 @@ import Quartz
 import math
 import os
 import random
+from collections import namedtuple
 
 from .context import getContextForFileExt, getContextOptions, getFileExtensions, getContextOptionsDocs
 from .context.baseContext import BezierPath, FormattedString, makeTextBoxes
@@ -1374,7 +1375,8 @@ class DrawBotDrawingTool(object):
 
     def tracking(self, value):
         """
-        Set the tracking between characters.
+        Set the tracking between characters. It adds an absolute number of
+        points between the characters.
 
         .. downloadcode:: tracking.py
 
@@ -1403,7 +1405,7 @@ class DrawBotDrawingTool(object):
     def underline(self, value):
         """
         Set the underline value.
-        Underline must be `single` or `None.
+        Underline must be `single`, `thick`, `double` or `None`.
 
         .. downloadcode:: underline.py
 
@@ -1415,6 +1417,19 @@ class DrawBotDrawingTool(object):
             raise DrawBotError("underline must be %s" % (", ".join(sorted(self._dummyContext._textUnderlineMap.keys()))))
         self._dummyContext.underline(value)
         self._addInstruction("underline", value)
+
+    def url(self, value):
+        """
+        Set the url value for text.
+
+        .. downloadcode:: url.py
+
+            fontSize(140)
+            url("http://drawbot.com")
+            text("hello", (100, 100))
+        """
+        self._dummyContext.url(value)
+        self._addInstruction("url", value)
 
     def hyphenation(self, value):
         """
@@ -1538,7 +1553,7 @@ class DrawBotDrawingTool(object):
     def listOpenTypeFeatures(self, fontName=None):
         return self._dummyContext._state.text.listOpenTypeFeatures(fontName)
 
-    listOpenTypeFeatures.__doc__ = FormattedString.listFontVariations.__doc__
+    listOpenTypeFeatures.__doc__ = FormattedString.listOpenTypeFeatures.__doc__
 
     def fontVariations(self, *args, **axes):
         """
@@ -1792,6 +1807,41 @@ class DrawBotDrawingTool(object):
         origins = CoreText.CTFrameGetLineOrigins(box, (0, len(ctLines)), None)
         return [(x + o.x, y + o.y) for o in origins]
 
+    def textBoxCharacterBounds(self, txt, box, align=None):
+        """
+        Returns a list of typesetted bounding boxes `((x, y, w, h), baseLineOffset, characters, formattedString)`.
+
+        A `box` could be a `(x, y, w, h)` or a bezierPath object.
+
+        Optionally an alignment can be set.
+        Possible `align` values are: `"left"`, `"center"`, `"right"` and `"justified"`.
+        """
+        if not isinstance(txt, (str, FormattedString)):
+            raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
+
+        CharactersBounds = namedtuple('CharactersBounds', ['bounds', 'baselineOffset', 'formattedSubString'])
+
+        bounds = list()
+        path, (x, y) = self._dummyContext._getPathForFrameSetter(box)
+        attrString = self._dummyContext.attributedString(txt)
+        setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
+        box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
+        ctLines = CoreText.CTFrameGetLines(box)
+        origins = CoreText.CTFrameGetLineOrigins(box, (0, len(ctLines)), None)
+        for i, (originX, originY) in enumerate(origins):
+            ctLine = ctLines[i]
+            ctRuns = CoreText.CTLineGetGlyphRuns(ctLine)
+            for ctRun in ctRuns:
+                runRange = CoreText.CTRunGetStringRange(ctRun)
+                runPos = CoreText.CTRunGetPositions(ctRun, (0, 1), None)[0]
+                runW, runH, ascent, descent = CoreText.CTRunGetTypographicBounds(ctRun, (0, 0), None, None, None)
+                bounds.append(CharactersBounds(
+                    (x + originX + runPos.x, y + originY + runPos.y - ascent, runW, runH + ascent),
+                    ascent,
+                    txt[runRange.location: runRange.location + runRange.length]
+                ))
+        return bounds
+
     _formattedStringClass = FormattedString
 
     def FormattedString(self, *args, **kwargs):
@@ -1856,7 +1906,7 @@ class DrawBotDrawingTool(object):
         """
         if isinstance(path, self._imageClass):
             path = path._nsImage()
-        if isinstance(path, str):
+        if isinstance(path, (str, os.PathLike)):
             path = optimizePath(path)
         self._requiresNewFirstPage = True
         self._addInstruction("image", path, position, alpha, pageNumber)
@@ -1901,8 +1951,8 @@ class DrawBotDrawingTool(object):
                 rep = gifTools.gifFrameAtIndex(url, pageNumber - 1)
             elif _isPDF and pageNumber is not None:
                 page = pdfDocument.pageAtIndex_(pageNumber - 1)
-                # this is probably not the fastest method...
-                rep = AppKit.NSImage.alloc().initWithData_(page.dataRepresentation())
+                mediaBox = page.boundsForBox_(Quartz.kPDFDisplayBoxMediaBox)
+                return mediaBox.size.width, mediaBox.size.height
             else:
                 _hasPixels = True
                 rep = AppKit.NSImageRep.imageRepWithContentsOfURL_(url)
@@ -2073,25 +2123,59 @@ class DrawBotDrawingTool(object):
 
     # pdf links
 
-    def linkDestination(self, name, x=None, y=None):
+    def linkURL(self, url, xywh):
+        """
+        Add a clickable rectangle for an external url link.
+
+        The link rectangle will be set independent of the current context transformations.
+        """
+        x, y, w, h = xywh
+        self._requiresNewFirstPage = True
+        self._addInstruction("linkURL", url, (x, y, w, h))
+
+    def linkDestination(self, name, xy):
         """
         Add a destination point for a link within a PDF.
+        Setup a clickable retangle with `linkRect(name, (x, y, w, h))` with the same name.
 
         The destination position will be set independent of the current context transformations.
         """
-        if x:
-            if len(x) == 2:
-                x, y = x
-            else:
-                x, y = (None, None)
+        x, y = xy
         self._requiresNewFirstPage = True
         self._addInstruction("linkDestination", name, (x, y))
 
     def linkRect(self, name, xywh):
         """
-        Add a rect for a link within a PDF.
+        Add a clickable rectangle for a link within a PDF.
+        Use `linkDestination(name, (x, y))` with the same name to set the destination of the clickable rectangle.
 
         The link rectangle will be set independent of the current context transformations.
+
+        .. downloadcode:: linkRect.py
+
+            # a variable with the amount of pages we want
+            totalPages = 10
+            # create the first page with a index
+            newPage()
+            # set a font size
+            fontSize(30)
+            # start a loop over all wanted pages
+            for i in range(totalPages):
+                # set a random fill color
+                fill(random(), random(), random())
+                # draw a rectangle
+                rect(10, 50 * i, 50, 50)
+                # add a clickable link rectangle with a unique name
+                linkRect(f"beginPage_{i}", (10, 10 + 50 * i, 50, 50))
+
+            # start a loop over all wanted pages
+            for i in range(totalPages):
+                # create a new page
+                newPage()
+                # add a link destination with a given name
+                # the name must refer to a linkRect name
+                linkDestination(f"beginPage_{i}", (0, 0))
+
         """
         x, y, w, h = xywh
         self._requiresNewFirstPage = True
@@ -2368,13 +2452,21 @@ class DrawBotDrawingTool(object):
         """
         return self._imageClass(path)
 
-    def Variable(self, variables, workSpace):
+    def Variable(self, variables, workSpace, continuous=True):
         """
         Build small UI for variables in a script.
 
         The `workSpace` is usually `globals()`
         as you want to insert the variable in the current workspace.
         It is required that `workSpace` is a `dict` object.
+
+        The `continuous` argument controls whether the script is run when UI
+        elements change. The default is `True`, which will execute the script
+        immediately and continuously when the user input changes. When set to
+        `False`, there will be an "Update" button added at the bottom of the window.
+        The user will have to click this button to execute the script and see the
+        changes. This is useful when the script is slow, and continuous execution
+        would decrease responsiveness.
 
         .. image:: assets/variables.png
 
@@ -2443,10 +2535,10 @@ class DrawBotDrawingTool(object):
             raise DrawBotError("There is no document open")
         controller = document.vanillaWindowController
         try:
-            controller._variableController.buildUI(variables)
+            controller._variableController.buildUI(variables, continuous=continuous)
             controller._variableController.show()
         except Exception:
-            controller._variableController = VariableController(variables, controller.runCode, document)
+            controller._variableController = VariableController(variables, controller.runCode, document, continuous=continuous)
 
         data = controller._variableController.get()
         for v, value in data.items():

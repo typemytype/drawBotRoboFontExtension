@@ -255,7 +255,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         the current subpath.
         """
         if hasattr(self, "_pointToSegmentPen"):
-            # its been uses in a point pen world
+            # its been used in a point pen world
             pointToSegmentPen = self._pointToSegmentPen
             del self._pointToSegmentPen
             pointToSegmentPen.endPath()
@@ -955,47 +955,61 @@ def makeTextBoxes(attributedString, xy, align, plainText):
     ctLines = CoreText.CTFrameGetLines(frame)
     origins = CoreText.CTFrameGetLineOrigins(frame, (0, len(ctLines)), None)
     boxes = []
+    if not origins:
+        return boxes
 
+    firstLineJump = h * 2 - origins[0].y
+
+    isFirstLine = True
     for ctLine, (originX, originY) in zip(ctLines, origins):
         rng = CoreText.CTLineGetStringRange(ctLine)
 
         attributedSubstring = attributedString.attributedSubstringFromRange_(rng)
         para, _ = attributedSubstring.attribute_atIndex_effectiveRange_(AppKit.NSParagraphStyleAttributeName, 0, None)
-        # strip trailing returns
-        if attributedSubstring.string()[-1] in ["\n", "\r"]:
-            attributedSubstring = attributedSubstring.mutableCopy()
-            if rng.length == 1:
-                # Apart from the newline, the string is empty, which will give us the wrong
-                # height. First replace the newline with a space, then measure the height,
-                # then strip the space. The width is zero for an empty string.
-                attributedSubstring.replaceCharactersInRange_withString_((rng.length - 1, 1), " ")
-                _, height = attributedSubstring.size()
-                width = 0  # width is zero, but is not used as we're skipping making a box for an empty string.
-                attributedSubstring.deleteCharactersInRange_((rng.length - 1, 1))
-                assert attributedSubstring.length() == 0
-            else:
-                attributedSubstring.deleteCharactersInRange_((rng.length - 1, 1))
-                width, height = attributedSubstring.size()
-        else:
-            width, height = attributedSubstring.size()
+
+        width, height = attributedSubstring.size()
+
         if attributedSubstring.length() > 0:
             width += extraPadding
             originX = 0
-            if para.alignment() == AppKit.NSCenterTextAlignment:
-                originX -= width * .5
-            elif para.alignment() == AppKit.NSRightTextAlignment:
-                originX = -width
+            if para is not None:
+                if para.alignment() == AppKit.NSCenterTextAlignment:
+                    originX -= width * .5
+                elif para.alignment() == AppKit.NSRightTextAlignment:
+                    originX = -width
 
-            substring = FormattedString()
-            substring.getNSObject().appendAttributedString_(attributedSubstring)
-
+            attributedSubstring
+            if attributedSubstring.string()[-1] in ["\n", "\r"]:
+                attributedSubstring = attributedSubstring.mutableCopy()
+                attributedSubstring.deleteCharactersInRange_((rng.length - 1, 1))
             if plainText:
-                substring = str(substring)
+                substring = attributedSubstring.string()
+            else:
+                substring = FormattedString()
+                substring.getNSObject().appendAttributedString_(attributedSubstring)
 
-            box = (x + originX, y - originY, width, h * 2)
+            lineX = x + originX
+
+            if isFirstLine:
+                lineY = y - originY
+                box = (lineX, lineY, width, h * 2)
+            else:
+                lineY = y + originY + firstLineJump - h * 2
+                subSetter = CoreText.CTFramesetterCreateWithAttributedString(attributedSubstring)
+                subPath = Quartz.CGPathCreateMutable()
+                Quartz.CGPathAddRect(subPath, None, Quartz.CGRectMake(lineX, lineY, w, h * 2))
+                subFrame = CoreText.CTFramesetterCreateFrame(subSetter, (0, 0), subPath, None)
+                subOrigins = CoreText.CTFrameGetLineOrigins(subFrame, (0, 1), None)
+                if subOrigins:
+                    subOriginY = subOrigins[0].y
+                else:
+                    continue
+
+                box = (lineX, lineY - subOriginY, width, h * 2)
+
             boxes.append((substring, box))
 
-        y -= height * 2
+        isFirstLine = False
 
     return boxes
 
@@ -1025,8 +1039,8 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
 
     _textUnderlineMap = dict(
         single=AppKit.NSUnderlineStyleSingle,
-        # thick=AppKit.NSUnderlineStyleThick,
-        # double=AppKit.NSUnderlineStyleDouble,
+        thick=AppKit.NSUnderlineStyleThick,
+        double=AppKit.NSUnderlineStyleDouble,
         # solid=AppKit.NSUnderlinePatternSolid,
         # dotted=AppKit.NSUnderlinePatternDot,
         # dashed=AppKit.NSUnderlinePatternDash,
@@ -1051,6 +1065,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         tracking=None,
         baselineShift=None,
         underline=None,
+        url=None,
         openTypeFeatures=dict(),
         fontVariations=dict(),
         tabs=None,
@@ -1150,7 +1165,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         * `strokeWidth`: the strokeWidth to be used for the given text
         * `align`: the alignment to be used for the given text
         * `lineHeight`: the lineHeight to be used for the given text
-        * `tracking`: set tracking for the given text
+        * `tracking`: set tracking for the given text in absolute points
         * `baselineShift`: set base line shift for the given text
         * `openTypeFeatures`: enable OpenType features
         * `fontVariations`: pick a variation by axes values
@@ -1189,6 +1204,9 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             coreTextFontFeatures = []
             nsFontFeatures = []  # fallback for macOS < 10.13
             if self._openTypeFeatures:
+                # store openTypeFeatures in a custom attributes key
+                attributes["drawbot.openTypeFeatures"] = dict(self._openTypeFeatures)
+                # get existing openTypeFeatures for the font
                 existingOpenTypeFeatures = openType.getFeatureTagsForFontName(self._font)
                 # sort features by their on/off state
                 # set all disabled features first
@@ -1206,6 +1224,12 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
                     if nsFontFeatureTag in SFNTLayoutTypes.featureMap:
                         feature = SFNTLayoutTypes.featureMap[nsFontFeatureTag]
                         nsFontFeatures.append(feature)
+                    # kern is a special case
+                    if featureTag == "kern" and not value:
+                        # https://developer.apple.com/documentation/uikit/nskernattributename
+                        # The value 0 means kerning is disabled.
+                        attributes[AppKit.NSKernAttributeName] = 0
+
             coreTextFontVariations = dict()
             if self._fontVariations:
                 existingAxes = variation.getVariationAxesForFontName(self._font)
@@ -1305,12 +1329,17 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         if self._paragraphBottomSpacing is not None:
             para.setParagraphSpacing_(self._paragraphBottomSpacing)
 
-        if self._tracking:
-            attributes[AppKit.NSKernAttributeName] = self._tracking
+        if self._tracking is not None:
+            if macOSVersion < "10.12":
+                attributes[AppKit.NSKernAttributeName] = self._tracking
+            else:
+                attributes[CoreText.kCTTrackingAttributeName] = self._tracking
         if self._baselineShift is not None:
             attributes[AppKit.NSBaselineOffsetAttributeName] = self._baselineShift
         if self._underline in self._textUnderlineMap:
             attributes[AppKit.NSUnderlineStyleAttributeName] = self._textUnderlineMap[self._underline]
+        if self._url is not None:
+            attributes[AppKit.NSLinkAttributeName] = AppKit.NSURL.URLWithString_(self._url)
         if self._language:
             attributes["NSLanguage"] = self._language
         attributes[AppKit.NSParagraphStyleAttributeName] = para
@@ -1480,7 +1509,8 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
 
     def tracking(self, tracking):
         """
-        Set the tracking between characters.
+        Set the tracking between characters. It adds an absolute number of
+        points between the characters.
         """
         self._tracking = tracking
 
@@ -1493,9 +1523,16 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
     def underline(self, underline):
         """
         Set the underline value.
-        Underline must be `single` or `None`.
+        Underline must be `single`, `thick`, `double` or `None`.
         """
         self._underline = underline
+
+    def url(self, url):
+        """
+        set the url value.
+        url must be a string or `None`
+        """
+        self._url = url
 
     def openTypeFeatures(self, *args, **features):
         """
@@ -1700,6 +1737,9 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
     def tailIndent(self, indent):
         """
         Set indent of text right of the paragraph.
+
+        If positive, this value is the distance from the leading margin.
+        If 0 or negative, it’s the distance from the trailing margin.
         """
         self._tailIndent = indent
 
@@ -2132,6 +2172,9 @@ class BaseContext(object):
     def _printImage(self, pdf=None):
         pass
 
+    def _linkURL(self, url, xywh):
+        pass
+
     def _linkDestination(self, name, xy):
         pass
 
@@ -2377,6 +2420,9 @@ class BaseContext(object):
     def underline(self, underline):
         self._state.text.underline(underline)
 
+    def url(self, value):
+        self._state.text.url(value)
+
     def hyphenation(self, value):
         self._state.hyphenation = value
 
@@ -2583,6 +2629,10 @@ class BaseContext(object):
         if psName is not None:
             psName = psName.toUnicode()
         return psName
+
+    def linkURL(self, url, xywh):
+        x, y, w, h = xywh
+        self._linkURL(url, (x, y, w, h))
 
     def linkDestination(self, name, xy):
         x, y = xy
