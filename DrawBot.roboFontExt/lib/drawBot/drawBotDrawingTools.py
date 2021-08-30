@@ -8,7 +8,7 @@ import random
 from collections import namedtuple
 
 from .context import getContextForFileExt, getContextOptions, getFileExtensions, getContextOptionsDocs
-from .context.baseContext import BezierPath, FormattedString, makeTextBoxes
+from .context.baseContext import BezierPath, FormattedString, makeTextBoxes, getNSFontFromNameOrPath, getFontName
 from .context.dummyContext import DummyContext
 
 from .context.tools.imageObject import ImageObject
@@ -169,7 +169,6 @@ class DrawBotDrawingTool(object):
             saveImage("~/Desktop/anOval.pdf")
         """
         self._reset()
-        self.installedFonts()
 
     def endDrawing(self):
         """
@@ -1305,7 +1304,7 @@ class DrawBotDrawingTool(object):
 
     # text
 
-    def font(self, fontName, fontSize=None):
+    def font(self, fontNameOrPath, fontSize=None, fontNumber=0):
         """
         Set a font with the name of the font.
         If a font path is given the font will be installed and used directly.
@@ -1322,13 +1321,12 @@ class DrawBotDrawingTool(object):
 
             font("Times-Italic")
         """
-        fontName = self._tryInstallFontFromFontName(fontName)
-        fontName = str(fontName)
-        self._dummyContext.font(fontName, fontSize)
-        self._addInstruction("font", fontName, fontSize)
-        return fontName
+        font = getNSFontFromNameOrPath(fontNameOrPath, fontSize or 10, fontNumber)
+        self._dummyContext.font(fontNameOrPath, fontSize, fontNumber)
+        self._addInstruction("font", fontNameOrPath, fontSize, fontNumber)
+        return getFontName(font)
 
-    def fallbackFont(self, fontName):
+    def fallbackFont(self, fontNameOrPath, fontNumber=0):
         """
         Set a fallback font, this is used whenever a glyph is not available in the current font.
 
@@ -1336,14 +1334,12 @@ class DrawBotDrawingTool(object):
 
             fallbackFont("Times")
         """
-        fontName = self._tryInstallFontFromFontName(fontName)
-        fontName = str(fontName)
-        dummyFont = AppKit.NSFont.fontWithName_size_(fontName, 10)
+        dummyFont = getNSFontFromNameOrPath(fontNameOrPath, 10, fontNumber)
         if dummyFont is None:
             raise DrawBotError("Fallback font '%s' is not available" % fontName)
-        self._dummyContext.fallbackFont(fontName)
-        self._addInstruction("fallbackFont", fontName)
-        return fontName
+        self._dummyContext.fallbackFont(fontNameOrPath)
+        self._addInstruction("fallbackFont", fontNameOrPath, fontNumber)
+        return getFontName(dummyFont)
 
     def fontSize(self, fontSize):
         """
@@ -1532,26 +1528,34 @@ class DrawBotDrawingTool(object):
 
             c2pc, c2sc, calt, case, cpsp, cswh, dlig, frac, liga, lnum, onum, ordn, pnum, rlig, sinf, smcp, ss01, ss02, ss03, ss04, ss05, ss06, ss07, ss08, ss09, ss10, ss11, ss12, ss13, ss14, ss15, ss16, ss17, ss18, ss19, ss20, subs, sups, swsh, titl, tnum
 
+        A `resetFeatures` argument can be set to `True` in order to get back to the default state.
+
         .. downloadcode:: openTypeFeatures.py
 
-            size(1000, 300)
+            newPage(1000, 300)
             # set a font
             font("Didot")
             # set the font size
             fontSize(50)
-            # draw a string
-            text("aabcde1234567890", (100, 200))
+            # create a string
+            someTxt = "aabcde1234567890"
+            # draw the string
+            text(someTxt, (100, 220))
             # enable some OpenType features
             openTypeFeatures(onum=True, smcp=True)
             # draw the same string
-            text("aabcde1234567890", (100, 100))
+            text(someTxt, (100, 150))
+            # reset defaults
+            openTypeFeatures(resetFeatures=True)
+            # the same string again, back to default features
+            text(someTxt, (100, 70))
         """
         result = self._dummyContext.openTypeFeatures(*args, **features)
         self._addInstruction("openTypeFeatures", *args, **features)
         return result
 
-    def listOpenTypeFeatures(self, fontName=None):
-        return self._dummyContext._state.text.listOpenTypeFeatures(fontName)
+    def listOpenTypeFeatures(self, fontNameOrPath=None):
+        return self._dummyContext._state.text.listOpenTypeFeatures(fontNameOrPath)
 
     listOpenTypeFeatures.__doc__ = FormattedString.listOpenTypeFeatures.__doc__
 
@@ -1582,13 +1586,13 @@ class DrawBotDrawingTool(object):
         self._addInstruction("fontVariations", *args, **axes)
         return result
 
-    def listFontVariations(self, fontName=None):
-        return self._dummyContext._state.text.listFontVariations(fontName)
+    def listFontVariations(self, fontNameOrPath=None):
+        return self._dummyContext._state.text.listFontVariations(fontNameOrPath)
 
     listFontVariations.__doc__ = FormattedString.listFontVariations.__doc__
 
-    def listNamedInstances(self, fontName=None):
-        return self._dummyContext._state.text.listNamedInstances(fontName)
+    def listNamedInstances(self, fontNameOrPath=None):
+        return self._dummyContext._state.text.listNamedInstances(fontNameOrPath)
 
     listNamedInstances.__doc__ = FormattedString.listNamedInstances.__doc__
 
@@ -2237,7 +2241,14 @@ class DrawBotDrawingTool(object):
             text("Hello World", (10, 10))
             # uninstall font
             uninstallFont(path)
+
+        This function has been deprecated: please use the font path directly in all
+        places that accept a font name.
         """
+        warnings.warn(
+            "installFont(path) has been deprecated, use the font path directly in "
+            "all places that accept a font name."
+        )
         if path in self._tempInstalledFonts:
             return self._tempInstalledFonts[path]
 
@@ -2256,7 +2267,14 @@ class DrawBotDrawingTool(object):
     def uninstallFont(self, path):
         """
         Uninstall a font with a given path.
+
+        This function has been deprecated: please use the font path directly in all
+        places that accept a font name.
         """
+        warnings.warn(
+            "uninstallFont(path) has been deprecated, use the font path directly in "
+            "all places that accept a font name."
+        )
         success, error = self._dummyContext.uninstallFont(path)
         if path in self._tempInstalledFonts:
             del self._tempInstalledFonts[path]
@@ -2268,17 +2286,6 @@ class DrawBotDrawingTool(object):
         for path in self._tempInstalledFonts:
             self._dummyContext.uninstallFont(path)
         self._tempInstalledFonts = dict()
-
-    def _tryInstallFontFromFontName(self, fontName):
-        # check if the fontName is actually a path
-        if os.path.exists(fontName) and not os.path.isdir(fontName):
-            fontPath = os.path.abspath(fontName)
-            ext = os.path.splitext(fontPath)[1]
-            if ext.lower() in [".otf", ".ttf", ".ttc"]:
-                fontName = self.installFont(fontPath)
-            else:
-                raise DrawBotError("Font '%s' is not .ttf, .otf or .ttc." % fontPath)
-        return fontName
 
     def fontContainsCharacters(self, characters):
         """
@@ -2298,6 +2305,12 @@ class DrawBotDrawingTool(object):
         Return the path to the file of the current font.
         """
         return self._dummyContext._state.text.fontFilePath()
+
+    def fontFileFontNumber(self):
+        """
+        Return the font number (index) the current font it its container file.
+        """
+        return self._dummyContext._state.text.fontFileFontNumber()
 
     def listFontGlyphNames(self):
         """
