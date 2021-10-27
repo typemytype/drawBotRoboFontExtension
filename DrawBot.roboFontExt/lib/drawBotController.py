@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
-from AppKit import *
-
-import sys
-import traceback
+import AppKit
 
 from vanilla import *
 from defconAppKit.windows.baseWindow import BaseWindowController
@@ -73,7 +70,7 @@ class DrawBotController(BaseWindowController):
                 callback=self.toolbarDedent,
                 imageTemplate=True,
                 ),
-            dict(itemIdentifier=NSToolbarFlexibleSpaceItemIdentifier),
+            dict(itemIdentifier=AppKit.NSToolbarFlexibleSpaceItemIdentifier),
 
             dict(itemIdentifier="save",
                 label="Save",
@@ -88,7 +85,7 @@ class DrawBotController(BaseWindowController):
                 imageTemplate=True,
                 ),
 
-            dict(itemIdentifier=NSToolbarSpaceItemIdentifier),
+            dict(itemIdentifier=AppKit.NSToolbarSpaceItemIdentifier),
 
             dict(itemIdentifier="reload",
                 label="Reload",
@@ -108,7 +105,7 @@ class DrawBotController(BaseWindowController):
                 callback=self.toolbarOpen,
                 imageTemplate=True,
                 ),
-            dict(itemIdentifier=NSToolbarFlexibleSpaceItemIdentifier),
+            dict(itemIdentifier=AppKit.NSToolbarFlexibleSpaceItemIdentifier),
             ]
         self.w.addToolbar(toolbarIdentifier="DrawBotRoboFontExtensionToolbar", toolbarItems=toolbarItems, addStandardItems=False)
 
@@ -303,7 +300,7 @@ class DrawBotController(BaseWindowController):
     # UI
 
     def open(self, path=None):
-        documentController = NSDocumentController.sharedDocumentController()
+        documentController = AppKit.NSDocumentController.sharedDocumentController()
         documentClass = documentController.documentClassForType_("Python Source File")
         document = documentClass.alloc().init()
         document.vanillaWindowController = self
@@ -378,7 +375,7 @@ class DrawBotController(BaseWindowController):
         self.savePDF()
 
     def toolbarSave(self, sender):
-        if NSEvent.modifierFlags() & NSAlternateKeyMask:
+        if AppKit.NSEvent.modifierFlags() & AppKit.NSAlternateKeyMask:
             self.document().saveDocumentAs_(self)
         else:
             self.document().saveDocument_(self)

@@ -1,7 +1,7 @@
 import sys
 import traceback
 
-from AppKit import *
+import AppKit
 
 
 class StdOutput(object):
@@ -44,24 +44,24 @@ def CallbackRunner(callback, stdout=None, stderr=None, args=[], kwargs={}, fallb
 
 
 def createSavePDFImage():
-    im = NSImage.imageNamed_("toolbarScriptNew")
-    pdfText = NSString.stringWithString_("PDF")
+    im = AppKit.NSImage.imageNamed_("toolbarScriptNew")
+    pdfText = AppKit.NSString.stringWithString_("PDF")
 
-    shadow = NSShadow.alloc().init()
+    shadow = AppKit.NSShadow.alloc().init()
     shadow.setShadowOffset_((0, -1))
-    shadow.setShadowColor_(NSColor.whiteColor())
+    shadow.setShadowColor_(AppKit.NSColor.whiteColor())
     shadow.setShadowBlurRadius_(1)
 
     attributes = {
-        NSFontAttributeName: NSFont.boldSystemFontOfSize_(7),
-        NSForegroundColorAttributeName: NSColor.darkGrayColor(),
-        NSShadowAttributeName: shadow
+        AppKit.NSFontAttributeName: AppKit.NSFont.boldSystemFontOfSize_(7),
+        AppKit.NSForegroundColorAttributeName: AppKit.NSColor.darkGrayColor(),
+        AppKit.NSShadowAttributeName: shadow
     }
 
-    pdfSaveImage = NSImage.alloc().initWithSize_(im.size())
+    pdfSaveImage = AppKit.NSImage.alloc().initWithSize_(im.size())
 
     pdfSaveImage.lockFocus()
-    im.drawAtPoint_fromRect_operation_fraction_((0, 0), NSZeroRect, NSCompositeSourceOver, 1)
+    im.drawAtPoint_fromRect_operation_fraction_((0, 0), AppKit.NSZeroRect, AppKit.NSCompositeSourceOver, 1)
     pdfText.drawAtPoint_withAttributes_((10, 10), attributes)
     pdfSaveImage.unlockFocus()
 
