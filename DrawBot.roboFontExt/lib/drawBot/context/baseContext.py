@@ -807,7 +807,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
 
 class Color(object):
 
-    colorSpace = AppKit.NSColorSpace.genericRGBColorSpace
+    colorSpace = AppKit.NSColorSpace.genericRGBColorSpace()
 
     def __init__(self, r=None, g=None, b=None, a=1):
         self._color = None
@@ -821,7 +821,7 @@ class Color(object):
             self._color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(r, r, r, g)
         else:
             self._color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, a)
-        self._color = self._color.colorUsingColorSpace_(self.colorSpace())
+        self._color = self._color.colorUsingColorSpace_(self.colorSpace)
 
     def set(self):
         self._color.set()
@@ -858,7 +858,7 @@ class Color(object):
 
 class CMYKColor(Color):
 
-    colorSpace = AppKit.NSColorSpace.genericCMYKColorSpace
+    colorSpace = AppKit.NSColorSpace.genericCMYKColorSpace()
 
     def __init__(self, c=None, m=None, y=None, k=None, a=1):
         if c is None:
@@ -867,7 +867,7 @@ class CMYKColor(Color):
             self._color = c
         else:
             self._color = AppKit.NSColor.colorWithDeviceCyan_magenta_yellow_black_alpha_(c, m, y, k, a)
-        self._color = self._color.colorUsingColorSpace_(self.colorSpace())
+        self._color = self._color.colorUsingColorSpace_(self.colorSpace)
         self._cmyka = c, m, y, k, a
 
 
@@ -973,12 +973,11 @@ def makeTextBoxes(attributedString, xy, align, plainText):
             width += extraPadding
             originX = 0
             if para is not None:
-                if para.alignment() == AppKit.NSCenterTextAlignment:
+                if para.alignment() == AppKit.NSTextAlignmentCenter:
                     originX -= width * .5
-                elif para.alignment() == AppKit.NSRightTextAlignment:
+                elif para.alignment() == AppKit.NSTextAlignmentRight:
                     originX = -width
 
-            attributedSubstring
             if attributedSubstring.string()[-1] in ["\n", "\r"]:
                 attributedSubstring = attributedSubstring.mutableCopy()
                 attributedSubstring.deleteCharactersInRange_((rng.length - 1, 1))
@@ -1025,16 +1024,16 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
     _cmykColorClass = CMYKColor
 
     _textAlignMap = dict(
-        center=AppKit.NSCenterTextAlignment,
-        left=AppKit.NSLeftTextAlignment,
-        right=AppKit.NSRightTextAlignment,
-        justified=AppKit.NSJustifiedTextAlignment,
+        center=AppKit.NSTextAlignmentCenter,
+        left=AppKit.NSTextAlignmentLeft,
+        right=AppKit.NSTextAlignmentRight,
+        justified=AppKit.NSTextAlignmentJustified,
     )
 
     _textTabAlignMap = dict(
-        center=AppKit.NSCenterTextAlignment,
-        left=AppKit.NSLeftTextAlignment,
-        right=AppKit.NSRightTextAlignment,
+        center=AppKit.NSTextAlignmentCenter,
+        left=AppKit.NSTextAlignmentLeft,
+        right=AppKit.NSTextAlignmentRight,
     )
 
     _textUnderlineMap = dict(
@@ -2057,11 +2056,11 @@ class BaseContext(object):
     _textUnderlineMap = FormattedString._textUnderlineMap
 
     _colorSpaceMap = dict(
-        genericRGB=AppKit.NSColorSpace.genericRGBColorSpace,
-        adobeRGB1998=AppKit.NSColorSpace.adobeRGB1998ColorSpace,
-        sRGB=AppKit.NSColorSpace.sRGBColorSpace,
-        genericGray=AppKit.NSColorSpace.genericGrayColorSpace,
-        genericGamma22Gray=AppKit.NSColorSpace.genericGamma22GrayColorSpace,
+        genericRGB=AppKit.NSColorSpace.genericRGBColorSpace(),
+        adobeRGB1998=AppKit.NSColorSpace.adobeRGB1998ColorSpace(),
+        sRGB=AppKit.NSColorSpace.sRGBColorSpace(),
+        genericGray=AppKit.NSColorSpace.genericGrayColorSpace(),
+        genericGamma22Gray=AppKit.NSColorSpace.genericGamma22GrayColorSpace(),
     )
 
     _blendModeMap = dict(
@@ -2178,7 +2177,7 @@ class BaseContext(object):
     def saveImage(self, path, options):
         if not self.hasPage:
             raise DrawBotError("can't save image when no page is set")
-        self._saveImage(path, options)
+        return self._saveImage(path, options)
 
     def printImage(self, pdf=None):
         self._printImage(pdf)
