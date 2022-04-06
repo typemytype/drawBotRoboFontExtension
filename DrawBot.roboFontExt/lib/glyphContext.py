@@ -1,5 +1,6 @@
 import CoreText
 import AppKit
+import math
 import os
 import re
 
@@ -23,9 +24,9 @@ class GlyphBezierPath(BezierPath):
     def oval(self, x, y, w, h):
         # make the oval with points at the extremes
         # the NSBezierPath oval has no extreme points
-        c = 0.60
-        hx = w * c * .5
-        hy = h * c * .5
+        kappa = 4 * (math.sqrt(2) - 1) / 3
+        hx = w * kappa * .5
+        hy = h * kappa * .5
         self.moveTo((x + w * .5, y))
         self.curveTo((x + w * .5 + hx, y), (x + w, y + h * .5 - hy), (x + w, y + h * .5))
         self.curveTo((x + w, y + h * .5 + hy), (x + w * .5 + hx, y + h), (x + w * .5, y + h))
