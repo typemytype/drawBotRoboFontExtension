@@ -4,6 +4,7 @@ import Quartz
 
 import math
 import os
+from packaging.version import Version
 
 from fontTools.pens.basePen import BasePen
 
@@ -1231,7 +1232,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             fontAttributes = {}
             if coreTextFontFeatures:
                 fontAttributes[CoreText.kCTFontFeatureSettingsAttribute] = coreTextFontFeatures
-                if macOSVersion < "10.13":
+                if macOSVersion < Version("10.13"):
                     # fallback for macOS < 10.13:
                     fontAttributes[CoreText.NSFontFeatureSettingsAttribute] = nsFontFeatures
             if coreTextFontVariations:
@@ -1317,7 +1318,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             para.setParagraphSpacing_(self._paragraphBottomSpacing)
 
         if self._tracking is not None:
-            if macOSVersion < "10.12":
+            if macOSVersion < Version("10.12"):
                 attributes[AppKit.NSKernAttributeName] = self._tracking
             else:
                 attributes[CoreText.kCTTrackingAttributeName] = self._tracking
@@ -2557,6 +2558,12 @@ class BaseContext(object):
             (x, y), (w, h) = CoreText.CGPathGetPathBoundingBox(path)
         else:
             x, y, w, h = box
+            if w < 0:
+                x += w
+                w = -w
+            if h < 0:
+                y += h
+                h = -h
             path = CoreText.CGPathCreateMutable()
             CoreText.CGPathAddRect(path, None, CoreText.CGRectMake(x, y, w, h))
         return path, (x, y)
@@ -2645,7 +2652,8 @@ def getNSFontFromNameOrPath(fontNameOrPath, fontSize, fontNumber):
 def _getNSFontFromNameOrPath(fontNameOrPath, fontSize, fontNumber):
     if fontSize is None:
         fontSize = 10
-    if isinstance(fontNameOrPath, str):
+    if isinstance(fontNameOrPath, str) and not fontNameOrPath.startswith("."):
+        # skip dot prefix font names, those are system fonts
         nsFont = AppKit.NSFont.fontWithName_size_(fontNameOrPath, fontSize)
         if nsFont is not None:
             return nsFont
