@@ -1809,7 +1809,7 @@ class DrawBotDrawingTool(object):
         if not isinstance(txt, (str, FormattedString)):
             raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         path, (x, y) = self._dummyContext._getPathForFrameSetter(box)
-        attrString = self._dummyContext.attributedString(txt)
+        attrString = self._dummyContext.attributedString(txt, align=align)
         setter = CoreText.CTFramesetterCreateWithAttributedString(attrString)
         box = CoreText.CTFramesetterCreateFrame(setter, (0, 0), path, None)
         ctLines = CoreText.CTFrameGetLines(box)
@@ -1818,7 +1818,7 @@ class DrawBotDrawingTool(object):
 
     def textBoxCharacterBounds(self, txt, box, align=None):
         """
-        Returns a list of typesetted bounding boxes `((x, y, w, h), baseLineOffset, characters, formattedString)`.
+        Returns a list of typesetted bounding boxes `((x, y, w, h), baseLineOffset, formattedSubString)`.
 
         A `box` could be a `(x, y, w, h)` or a bezierPath object.
 
@@ -1902,7 +1902,7 @@ class DrawBotDrawingTool(object):
     def image(self, path, position, alpha=1, pageNumber=None):
         """
         Add an image from a `path` with an `offset` and an `alpha` value.
-        This should accept most common file types like pdf, jpg, png, tiff and gif.
+        This accepts most common file types like pdf, jpg, png, tiff and gif. `NSImage` objects are accepted too.
 
         Optionally an `alpha` can be provided, which is a value between 0 and 1.
 
@@ -1922,7 +1922,7 @@ class DrawBotDrawingTool(object):
 
     def imageSize(self, path, pageNumber=None):
         """
-        Return the `width` and `height` of an image.
+        Return the `width` and `height` of an image. Supports pdf, jpg, png, tiff and gif file formats. `NSImage` objects are supported too.
 
         .. downloadcode:: imageSize.py
 
@@ -1936,7 +1936,13 @@ class DrawBotDrawingTool(object):
 
         if isinstance(path, AppKit.NSImage):
             # its an NSImage
-            rep = path
+            reps = path.representations()
+            if not reps:
+                # raise error when no representation are found
+                raise DrawBotError("Cannot extract bitmap data from given nsImage object")
+            # get the bitmap representation
+            _hasPixels = True
+            rep = reps[0]
         else:
             if isinstance(path, (str, os.PathLike)):
                 path = optimizePath(path)
@@ -1974,7 +1980,8 @@ class DrawBotDrawingTool(object):
 
     def imagePixelColor(self, path, xy):
         """
-        Return the color `r, g, b, a` of an image at a specified `x`, `y` possition.
+        Return the color `r, g, b, a` of an image at a specified `x`, `y` position.
+        Supports pdf, jpg, png, tiff and gif file formats. `NSImage` objects are supported too.
 
         .. downloadcode:: pixelColor.py
 
@@ -2034,7 +2041,7 @@ class DrawBotDrawingTool(object):
 
     def imageResolution(self, path):
         """
-        Return the image resolution for a given image.
+        Return the image resolution for a given image. Supports pdf, jpg, png, tiff and gif file formats. `NSImage` objects are supported too.
         """
         if isinstance(path, AppKit.NSImage):
             # its an NSImage
@@ -2171,9 +2178,11 @@ class DrawBotDrawingTool(object):
             # start a loop over all wanted pages
             for i in range(totalPages):
                 # set a random fill color
-                fill(random(), random(), random())
+                fill(i/(totalPages-1), .5, i/(totalPages-1))
                 # draw a rectangle
                 rect(10, 50 * i, 50, 50)
+                fill(1)
+                textBox(f"{i}", (10, 50 * i, 50, 50))
                 # add a clickable link rectangle with a unique name
                 linkRect(f"beginPage_{i}", (10, 10 + 50 * i, 50, 50))
 
@@ -2181,9 +2190,12 @@ class DrawBotDrawingTool(object):
             for i in range(totalPages):
                 # create a new page
                 newPage()
+                fontSize(200)
+                text(f"Page {i}", (30, 30))
                 # add a link destination with a given name
                 # the name must refer to a linkRect name
-                linkDestination(f"beginPage_{i}", (0, 0))
+                oval(width()/2-10, height()/2-10, 20, 20)
+                linkDestination(f"beginPage_{i}", (width()/2, height()/2))
 
         """
         x, y, w, h = xywh
@@ -2438,7 +2450,7 @@ class DrawBotDrawingTool(object):
     def ImageObject(self, path=None):
         """
         Return a Image object, packed with filters.
-        This is a reusable object.
+        This is a reusable object. Supports pdf, jpg, png, tiff and gif file formats. `NSImage` objects are supported too.
 
         .. downloadcode:: imageObject.py
 
