@@ -87,12 +87,15 @@ class OpenFilesInDrawBotController(object):
         addObserver(self, "openFile", "applicationOpenFile")
 
     def openFile(self, notification):
-        if getExtensionDefault("com.drawBot.openPyFileDirectly", False):
-            fileHandler = notification["fileHandler"]
-            path = notification["path"]
-            _, ext = os.path.splitext(path)
-            if ext.lower() == ".py":
-                DrawBotController().open(path)
-                fileHandler["opened"] = True
+        fileHandler = notification["fileHandler"]
+        path = notification["path"]
+        _, ext = os.path.splitext(path)
+        if ext.lower() == ".py":
+            with open(path) as file:
+                header = file.readline().strip('\n')
+                # dont be strict about case or whitespace
+                if header.lower().replace(" ", "") == "#drawbot" or getExtensionDefault("com.drawBot.openPyFileDirectly", False)::
+                    DrawBotController().open(path)
+                    fileHandler["opened"] = True
 
 OpenFilesInDrawBotController()
