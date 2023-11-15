@@ -92,7 +92,10 @@ class OpenFilesInDrawBotController(object):
             path = notification["path"]
             _, ext = os.path.splitext(path)
             if ext.lower() == ".py":
-                DrawBotController().open(path)
-                fileHandler["opened"] = True
+                with open(path) as file:
+                    header = file.readline().strip('\n')
+                    if header.lower() == "#!drawbot":
+                        DrawBotController().open(path)
+                        fileHandler["opened"] = True
 
 OpenFilesInDrawBotController()
