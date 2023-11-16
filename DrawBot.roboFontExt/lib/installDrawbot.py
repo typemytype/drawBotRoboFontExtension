@@ -94,7 +94,7 @@ class OpenFilesInDrawBotController(object):
             with open(path) as file:
                 header = file.readline().strip('\n')
                 # dont be strict about case or whitespace
-                if header.lower().replace(" ", "") == "#drawbot" or getExtensionDefault("com.drawBot.openPyFileDirectly", False)::
+                if header.lower().replace(" ", "") == "#drawbot" or getExtensionDefault("com.drawBot.openPyFileDirectly", False):
                     DrawBotController().open(path)
                     fileHandler["opened"] = True
 
