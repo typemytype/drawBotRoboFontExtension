@@ -1,36 +1,27 @@
-import AppKit # type: ignore
-import CoreText # type: ignore
-import Quartz # type: ignore
+import AppKit
+import CoreText
+import Quartz
 
 import math
-from typing import Any
 import os
 from packaging.version import Version
 
-from fontTools.pens.basePen import BasePen, AbstractPen # type: ignore
-from fontTools.pens.pointPen import AbstractPointPen # type: ignore
+from fontTools.pens.basePen import BasePen
 
 from drawBot.misc import DrawBotError, cmyk2rgb, warnings, transformationAtCenter
 from drawBot.macOSVersion import macOSVersion
-from drawBot.misc import memoize, validateLanguageCode
+from drawBot.misc import memoize
 
 from .tools import openType
 from .tools import variation
 from .tools import SFNTLayoutTypes
 
-from typing import Self
-from drawBot.aliases import (
-    BoundingBox,
-    Point,
-    TransformTuple,
-    SomePath,
-)
 
 _FALLBACKFONT = "LucidaGrande"
 _LINEJOINSTYLESMAP = dict(
     miter=Quartz.kCGLineJoinMiter,
     round=Quartz.kCGLineJoinRound,
-    bevel=Quartz.kCGLineJoinBevel,
+    bevel=Quartz.kCGLineJoinBevel
 )
 _LINECAPSTYLESMAP = dict(
     butt=Quartz.kCGLineCapButt,
@@ -108,7 +99,7 @@ class BezierContour(list):
         return "<BezierContour>"
 
     def _get_clockwise(self):
-        from fontTools.pens.areaPen import AreaPen # type: ignore
+        from fontTools.pens.areaPen import AreaPen
         pen = AreaPen()
         pen.endPath = pen.closePath
         self.drawToPen(pen)
@@ -152,59 +143,7 @@ class BezierContour(list):
 class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
 
     """
-    Return a BezierPath object.
-    This is a reusable object, if you want to draw the same over and over again.
-
-    .. downloadcode:: bezierPath.py
-
-        # create a bezier path
-        path = BezierPath()
-
-        # move to a point
-        path.moveTo((100, 100))
-        # line to a point
-        path.lineTo((100, 200))
-        path.lineTo((200, 200))
-        # close the path
-        path.closePath()
-
-        # loop over a range of 10
-        for i in range(10):
-            # set a random color with alpha value of .3
-            fill(random(), random(), random(), .3)
-            # in each loop draw the path
-            drawPath(path)
-            # translate the canvas
-            translate(50, 50)
-
-        path.text("Hello world", font="Helvetica", fontSize=30, offset=(210, 210))
-
-        print("All Points:")
-        print(path.points)
-
-        print("On Curve Points:")
-        print(path.onCurvePoints)
-
-        print("Off Curve Points:")
-        print(path.offCurvePoints)
-
-        # print out all points from all segments in all contours
-        for contour in path.contours:
-            for segment in contour:
-                for x, y in segment:
-                    print((x, y))
-            print(["contour is closed", "contour is open"][contour.open])
-
-        # translate the path
-        path.translate(0, -100)
-        # draw the path again
-        drawPath(path)
-        # translate the path
-        path.translate(-300, 0)
-        path.scale(2)
-        # draw the path again
-        drawPath(path)
-
+    A bezier path object, if you want to draw the same over and over again.
     """
 
     contourClass = BezierContour
@@ -227,7 +166,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
 
     # pen support
 
-    def moveTo(self, point: Point):
+    def moveTo(self, point):
         """
         Move to a point `x`, `y`.
         """
@@ -236,7 +175,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
     def _moveTo(self, pt):
         self._path.moveToPoint_(pt)
 
-    def lineTo(self, point: Point):
+    def lineTo(self, point):
         """
         Line to a point `x`, `y`.
         """
@@ -245,7 +184,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
     def _lineTo(self, pt):
         self._path.lineToPoint_(pt)
 
-    def curveTo(self, *points: Point):
+    def curveTo(self, *points):
         """
         Draw a cubic bezier with an arbitrary number of control points.
 
@@ -254,7 +193,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         """
         super(BezierPath, self).curveTo(*points)
 
-    def qCurveTo(self, *points: Point):
+    def qCurveTo(self, *points):
         """
         Draw a whole string of quadratic curve segments.
 
@@ -284,15 +223,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         self._pointToSegmentPen = PointToSegmentPen(self)
         self._pointToSegmentPen.beginPath()
 
-    def addPoint(
-        self,
-        point: Point,
-        segmentType: str | None = None,
-        smooth: bool = False,
-        name: str | None = None,
-        identifier=None,
-        **kwargs,
-    ):
+    def addPoint(self, point, segmentType=None, smooth=False, name=None, identifier=None, **kwargs):
         """
         Use the path as a point pen and add a point to the current subpath. `beginPath` must
         have been called prior to adding points with `addPoint` calls.
@@ -305,7 +236,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
             smooth=smooth,
             name=name,
             identifier=identifier,
-            **kwargs,
+            **kwargs
         )
 
     def endPath(self):
@@ -329,7 +260,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
             # with NSBezierPath, nothing special needs to be done for an open subpath.
             pass
 
-    def addComponent(self, glyphName: str, transformation: TransformTuple):
+    def addComponent(self, glyphName, transformation):
         """
         Add a sub glyph. The 'transformation' argument must be a 6-tuple
         containing an affine transformation, or a Transform object from the
@@ -340,7 +271,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         """
         super(BezierPath, self).addComponent(glyphName, transformation)
 
-    def drawToPen(self, pen: AbstractPen):
+    def drawToPen(self, pen):
         """
         Draw the bezier path into a pen
         """
@@ -348,7 +279,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         for contour in contours:
             contour.drawToPen(pen)
 
-    def drawToPointPen(self, pointPen: AbstractPointPen):
+    def drawToPointPen(self, pointPen):
         """
         Draw the bezier path into a point pen.
         """
@@ -356,48 +287,41 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         for contour in contours:
             contour.drawToPointPen(pointPen)
 
-    def arc(
-        self,
-        center: Point,
-        radius: float,
-        startAngle: float,
-        endAngle: float,
-        clockwise: bool,
-    ):
+    def arc(self, center, radius, startAngle, endAngle, clockwise):
         """
         Arc with `center` and a given `radius`, from `startAngle` to `endAngle`, going clockwise if `clockwise` is True and counter clockwise if `clockwise` is False.
         """
         self._path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_clockwise_(
             center, radius, startAngle, endAngle, clockwise)
 
-    def arcTo(self, point1: Point, point2: Point, radius: float):
+    def arcTo(self, point1, point2, radius):
         """
         Arc  defined by a circle inscribed inside the angle specified by three points:
         the current point, `point1`, and `point2`. The arc is drawn between the two points of the circle that are tangent to the two legs of the angle.
         """
         self._path.appendBezierPathWithArcFromPoint_toPoint_radius_(point1, point2, radius)
 
-    def rect(self, x: float, y: float, w: float, h: float):
+    def rect(self, x, y, w, h):
         """
         Add a rectangle at possition `x`, `y` with a size of `w`, `h`
         """
         self._path.appendBezierPathWithRect_(((x, y), (w, h)))
 
-    def oval(self, x: float, y: float, w: float, h: float):
+    def oval(self, x, y, w, h):
         """
         Add a oval at possition `x`, `y` with a size of `w`, `h`
         """
         self._path.appendBezierPathWithOvalInRect_(((x, y), (w, h)))
         self.closePath()
 
-    def line(self, point1: Point, point2: Point):
+    def line(self, point1, point2):
         """
         Add a line between two given points.
         """
         self.moveTo(point1)
         self.lineTo(point2)
 
-    def polygon(self, *points: Point, **kwargs):
+    def polygon(self, *points, **kwargs):
         """
         Draws a polygon with n-amount of points.
         Optionally a `close` argument can be provided to open or close the path.
@@ -415,15 +339,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         if doClose:
             self.closePath()
 
-    def text(
-        self,
-        txt,
-        offset: tuple[float, float] | None = None,
-        font=_FALLBACKFONT,
-        fontSize: float = 10,
-        align: str | None = None,
-        fontNumber: int = 0,
-    ):
+    def text(self, txt, offset=None, font=_FALLBACKFONT, fontSize=10, align=None, fontNumber=0):
         """
         Draws a `txt` with a `font` and `fontSize` at an `offset` in the bezier path.
         If a font path is given the font will be installed and used directly.
@@ -450,16 +366,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         for subTxt, box in makeTextBoxes(attributedString, (x, y), align=align, plainText=not isinstance(txt, FormattedString)):
             self.textBox(subTxt, box, font=font, fontSize=fontSize, align=align)
 
-    def textBox(
-        self,
-        txt,
-        box: BoundingBox,
-        font: str | SomePath = _FALLBACKFONT,
-        fontSize: float = 10,
-        align: str | None = None,
-        hyphenation: bool | None = None,
-        fontNumber: int = 0,
-    ):
+    def textBox(self, txt, box, font=_FALLBACKFONT, fontSize=10, align=None, hyphenation=None, fontNumber=0):
         """
         Draws a `txt` with a `font` and `fontSize` in a `box` in the bezier path.
         If a font path is given the font will be installed and used directly.
@@ -507,16 +414,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         self.optimizePath()
         return context.clippedText(txt, box, align)
 
-    def traceImage(
-        self,
-        path: SomePath,
-        threshold: float = 0.2,
-        blur: float | None = None,
-        invert: bool = False,
-        turd: int = 2,
-        tolerance: float = 0.2,
-        offset: tuple[float, float] = (0, 0),
-    ):
+    def traceImage(self, path, threshold=.2, blur=None, invert=False, turd=2, tolerance=0.2, offset=None):
         """
         Convert a given image to a vector outline.
 
@@ -579,7 +477,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         """
         self._path = path
 
-    def pointInside(self, xy: Point) -> bool:
+    def pointInside(self, xy):
         """
         Check if a point `x`, `y` is inside a path.
         """
@@ -639,7 +537,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         """
         self._path = self._path.bezierPathByReversingPath()
 
-    def appendPath(self, otherPath: Self):
+    def appendPath(self, otherPath):
         """
         Append a path.
         """
@@ -656,13 +554,13 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
 
     # transformations
 
-    def translate(self, x: float = 0, y: float = 0):
+    def translate(self, x=0, y=0):
         """
         Translate the path with a given offset.
         """
         self.transform((1, 0, 0, 1, x, y))
 
-    def rotate(self, angle: float, center: Point = (0, 0)):
+    def rotate(self, angle, center=(0, 0)):
         """
         Rotate the path around the `center` point (which is the origin by default) with a given angle in degrees.
         """
@@ -671,7 +569,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         s = math.sin(angle)
         self.transform((c, s, -s, c, 0, 0), center)
 
-    def scale(self, x: float = 1, y: float | None = None, center: Point = (0, 0)):
+    def scale(self, x=1, y=None, center=(0, 0)):
         """
         Scale the path with a given `x` (horizontal scale) and `y` (vertical scale).
 
@@ -683,7 +581,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
             y = x
         self.transform((x, 0, 0, y, 0, 0), center)
 
-    def skew(self, angle1: float, angle2: float=0, center: Point=(0, 0)):
+    def skew(self, angle1, angle2=0, center=(0, 0)):
         """
         Skew the path with given `angle1` and `angle2`.
 
@@ -695,7 +593,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         angle2 = math.radians(angle2)
         self.transform((1, math.tan(angle2), math.tan(angle1), 1, 0, 0), center)
 
-    def transform(self, transformMatrix: TransformTuple, center: Point = (0, 0)):
+    def transform(self, transformMatrix, center=(0, 0)):
         """
         Transform a path with a transform matrix (xy, xx, yy, yx, x, y).
         """
@@ -722,7 +620,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         Return the union between two bezier paths.
         """
         assert isinstance(other, self.__class__)
-        import booleanOperations # type: ignore
+        import booleanOperations
         contours = self._contoursForBooleanOperations() + other._contoursForBooleanOperations()
         result = self.__class__()
         booleanOperations.union(contours, result)
@@ -739,7 +637,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         self.setNSBezierPath(result.getNSBezierPath())
         return self
 
-    def difference(self, other: Self):
+    def difference(self, other):
         """
         Return the difference between two bezier paths.
         """
@@ -751,20 +649,19 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         booleanOperations.difference(subjectContours, clipContours, result)
         return result
 
-    def intersection(self, other: Self):
+    def intersection(self, other):
         """
         Return the intersection between two bezier paths.
         """
         assert isinstance(other, self.__class__)
         import booleanOperations
-
         subjectContours = self._contoursForBooleanOperations()
         clipContours = other._contoursForBooleanOperations()
         result = self.__class__()
         booleanOperations.intersection(subjectContours, clipContours, result)
         return result
 
-    def xor(self, other: Self):
+    def xor(self, other):
         """
         Return the xor between two bezier paths.
         """
@@ -776,7 +673,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
         booleanOperations.xor(subjectContours, clipContours, result)
         return result
 
-    def intersectionPoints(self, other: Self | None = None):
+    def intersectionPoints(self, other=None):
         """
         Return a list of intersection points as `x`, `y` tuples.
 
@@ -789,7 +686,7 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
             contours += other._contoursForBooleanOperations()
         return booleanOperations.getIntersections(contours)
 
-    def expandStroke(self, width: float, lineCap: str = "round", lineJoin: str = "round", miterLimit: float = 10):
+    def expandStroke(self, width, lineCap="round", lineJoin="round", miterLimit=10):
         """
         Returns a new bezier path with an expanded stroke around the original path,
         with a given `width`. Note: the new path will not contain the original path.
@@ -909,7 +806,8 @@ class BezierPath(BasePen, SVGContextPropertyMixin, ContextPropertyMixin):
             index += 1
 
 
-class Color():
+class Color(object):
+
     colorSpace = AppKit.NSColorSpace.genericRGBColorSpace()
 
     def __init__(self, r=None, g=None, b=None, a=1):
@@ -974,7 +872,8 @@ class CMYKColor(Color):
         self._cmyka = c, m, y, k, a
 
 
-class Shadow():
+class Shadow(object):
+
     _colorClass = Color
 
     def __init__(self, offset=None, blur=None, color=None):
@@ -996,7 +895,8 @@ class Shadow():
         return new
 
 
-class Gradient():
+class Gradient(object):
+
     _colorClass = Color
 
     def __init__(self, gradientType=None, start=None, end=None, colors=None, positions=None, startRadius=None, endRadius=None):
@@ -1117,37 +1017,8 @@ def makeTextBoxes(attributedString, xy, align, plainText):
 class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
 
     """
-    Return a string object that can handle text formatting.
-
-    .. downloadcode:: formattedString.py
-
-        size(1000, 200)
-        # create a formatted string
-        txt = FormattedString()
-
-        # adding some text with some formatting
-        txt.append("hello", font="Helvetica", fontSize=100, fill=(1, 0, 0))
-        # adding more text
-        txt.append("world", font="Times-Italic", fontSize=50, fill=(0, 1, 0))
-
-        # setting a font
-        txt.font("Helvetica-Bold")
-        txt.fontSize(75)
-        txt += "hello again"
-
-        # drawing the formatted string
-        text(txt, (10, 30))
-
-        # create a formatted string
-        txt = FormattedString()
-
-        # adding some text with some formatting
-        txt.append("hello", font="Didot", fontSize=50)
-        # adding more text with an
-        txt.append("world", font="Didot", fontSize=50, openTypeFeatures=dict(smcp=True))
-
-        text(txt, (10, 150))
-
+    FormattedString is a reusable object, if you want to draw the same over and over again.
+    FormattedString objects can be drawn with the `text(txt, (x, y))` and `textBox(txt, (x, y, w, h))` methods.
     """
 
     _colorClass = Color
@@ -1178,24 +1049,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         # byWord=0x8000 # AppKit.NSUnderlineByWord,
     )
 
-    _textstrikethroughMap = dict(
-        single=AppKit.NSUnderlineStyleSingle,
-        thick=AppKit.NSUnderlineStyleThick,
-        double=AppKit.NSUnderlineStyleDouble,
-        # solid=AppKit.NSUnderlinePatternSolid,
-        # dotted=AppKit.NSUnderlinePatternDot,
-        # dashed=AppKit.NSUnderlinePatternDash,
-        # dotDashed=AppKit.NSUnderlinePatternDashDot,
-        # dotDotted=AppKit.NSUnderlinePatternDashDotDot,
-        # byWord=0x8000 # AppKit.NSUnderlineByWord,
-    )
-
-    _writingDirectionMap = dict(
-        LTR=AppKit.NSWritingDirectionLeftToRight,
-        RTL=AppKit.NSWritingDirectionRightToLeft
-    )
-
-    _formattedAttributes: dict[str, Any] = dict(
+    _formattedAttributes = dict(
         font=_FALLBACKFONT,
         fallbackFont=None,
         fallbackFontNumber=0,
@@ -1213,7 +1067,6 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         tracking=None,
         baselineShift=None,
         underline=None,
-        strikethrough=None,
         url=None,
         openTypeFeatures=dict(),
         fontVariations=dict(),
@@ -1225,16 +1078,9 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         paragraphBottomSpacing=None,
 
         language=None,
-        writingDirection=None,
     )
 
-    # typing of private dictionary attributes
-    # generated from the _formattedAttributes during init
-    _openTypeFeatures: dict[str, bool]
-    _fontVariations: dict[str, float]
-    _tabs: list[tuple[float, str]] | None
-
-    def __init__(self, txt: str | None = None, **kwargs):
+    def __init__(self, txt=None, **kwargs):
         self.clear()
         # create all _<attributes> in the formatted text object
         # with default values
@@ -1253,19 +1099,6 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
                 self._setAttribute(key, value)
             self._setColorAttributes(attributes)
 
-    def textProperties(self):
-        """
-        Return a dict with all current stylistic text properties.
-        """
-        properties = dict()
-        for attributeName, defaultValue in self._formattedAttributes.items():
-            value = getattr(self, f"_{attributeName}", defaultValue)
-            # create new object if the value is a dictionary
-            if isinstance(value, dict):
-                value = dict(value)
-            properties[attributeName] = value
-        return properties
-
     def _setAttribute(self, attribute, value):
         method = getattr(self, attribute)
         if isinstance(value, (list, tuple)):
@@ -1280,7 +1113,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         for key in colorAttributeNames:
             value = attributes.get(key)
             if value is not None:
-                setattr(self, f"_{key}", value)
+                setattr(self, "_%s" % key, value)
 
         if self._fill is not None:
             try:
@@ -1320,7 +1153,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
     def clear(self):
         self._attributedString = AppKit.NSMutableAttributedString.alloc().init()
 
-    def append(self, txt: str | Self, **kwargs):
+    def append(self, txt, **kwargs):
         """
         Add `txt` to the formatted string with some additional text formatting attributes:
 
@@ -1362,14 +1195,14 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         elif not isinstance(txt, (str, FormattedString)):
             raise TypeError("expected 'str' or 'FormattedString', got '%s'" % type(txt).__name__)
         attributes = {}
-        # store all formattedString settings in a custom attributes key
-        attributes["drawBot.formattedString.properties"] = self.textProperties()
         attributes[AppKit.NSLigatureAttributeName] = 1  # https://github.com/typemytype/drawbot/issues/427
         if self._font:
             font = self._getNSFontWithFallback()
             coreTextFontFeatures = []
             nsFontFeatures = []  # fallback for macOS < 10.13
             if self._openTypeFeatures:
+                # store openTypeFeatures in a custom attributes key
+                attributes["drawbot.openTypeFeatures"] = dict(self._openTypeFeatures)
                 # get existing openTypeFeatures for the font
                 existingOpenTypeFeatures = openType.getFeatureTagsForFont(font)
                 # sort features by their on/off state
@@ -1493,15 +1326,10 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             attributes[AppKit.NSBaselineOffsetAttributeName] = self._baselineShift
         if self._underline in self._textUnderlineMap:
             attributes[AppKit.NSUnderlineStyleAttributeName] = self._textUnderlineMap[self._underline]
-        if self._strikethrough in self._textstrikethroughMap:
-            attributes[AppKit.NSStrikethroughStyleAttributeName] = self._textstrikethroughMap[self._strikethrough]
         if self._url is not None:
             attributes[AppKit.NSLinkAttributeName] = AppKit.NSURL.URLWithString_(self._url)
         if self._language:
             attributes["NSLanguage"] = self._language
-        if self._writingDirection in self._writingDirectionMap:
-            para.setBaseWritingDirection_(self._writingDirectionMap[self._writingDirection])
-
         attributes[AppKit.NSParagraphStyleAttributeName] = para
         txt = AppKit.NSAttributedString.alloc().initWithString_attributes_(txt, attributes)
         self._attributedString.appendAttributedString_(txt)
@@ -1519,7 +1347,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             font = getNSFontFromNameOrPath(ff, self._fontSize, ffNumber)
         return font
 
-    def __add__(self, txt: str | Self):
+    def __add__(self, txt):
         new = self.copy()
         if isinstance(txt, self.__class__):
             new.getNSObject().appendAttributedString_(txt.getNSObject())
@@ -1529,7 +1357,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             new.append(txt)
         return new
 
-    def __getitem__(self, index: int | slice) -> str | Self:
+    def __getitem__(self, index):
         if isinstance(index, slice):
             start = index.start
             stop = index.stop
@@ -1561,10 +1389,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
                 length = 0
 
             rng = location, length
-            if textLength == 0:
-                attributes = self.textProperties()
-            else:
-                attributes, _ = self._attributedString.attribute_atIndex_effectiveRange_("drawBot.formattedString.properties", location + length - 1, None)
+            attributes = {key: getattr(self, "_%s" % key) for key in self._formattedAttributes}
             new = self.__class__(**attributes)
             try:
                 new._attributedString = self._attributedString.attributedSubstringFromRange_(rng)
@@ -1575,18 +1400,13 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             text = self._attributedString.string()
             return text[index]
 
-    def __len__(self) -> int:
+    def __len__(self):
         return self._attributedString.length()
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return self._attributedString.string()
 
-    def font(
-        self,
-        fontNameOrPath: str | SomePath,
-        fontSize: float | None = None,
-        fontNumber: int = 0,
-    ) -> str | None:
+    def font(self, fontNameOrPath, fontSize=None, fontNumber=0):
         """
         Set a font with the name of the font.
         If a font path is given the font will used directly.
@@ -1606,10 +1426,10 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         font = getNSFontFromNameOrPath(fontNameOrPath, fontSize or 10, fontNumber)
         return getFontName(font)
 
-    def fontNumber(self, fontNumber: int):
+    def fontNumber(self, fontNumber):
         self._fontNumber = fontNumber
 
-    def fallbackFont(self, fontNameOrPath: SomePath, fontNumber: int = 0) -> str | None:
+    def fallbackFont(self, fontNameOrPath, fontNumber=0):
         """
         Set a fallback font, used whenever a glyph is not available in the normal font.
         If a font path is given the font will be installed and used directly.
@@ -1624,146 +1444,105 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         self._fallbackFontNumber = fontNumber
         return fontName
 
-    def fallbackFontNumber(self, fontNumber: int):
+    def fallbackFontNumber(self, fontNumber):
         self._fallbackFontNumber = fontNumber
 
-    def fontSize(self, fontSize: float):
+    def fontSize(self, fontSize):
         """
         Set the font size in points.
         The default `fontSize` is 10pt.
         """
         self._fontSize = fontSize
 
-    def fill(self,
-            r: float | None = None,
-            g: float | None = None,
-            b: float | None = None,
-            alpha: float = 1
-        ):
+    def fill(self, *fill):
         """
         Sets the fill color with a `red`, `green`, `blue` and `alpha` value.
         Each argument must a value float between 0 and 1.
         """
-        if r is None:
+        if fill and fill[0] is None:
             fill = None
-        else:
-            fill = tuple([i for i in (r, g, b, alpha) if i is not None])
         self._fill = fill
         self._cmykFill = None
 
-    def stroke(self,
-              r: float | None = None,
-              g: float | None = None,
-              b: float | None = None,
-              alpha: float = 1
-        ):
+    def stroke(self, *stroke):
         """
         Sets the stroke color with a `red`, `green`, `blue` and `alpha` value.
         Each argument must a value float between 0 and 1.
         """
-        if r is None:
+        if stroke and stroke[0] is None:
             stroke = None
-        else:
-            stroke = tuple([i for i in (r, g, b, alpha) if i is not None])
         self._stroke = stroke
         self._cmykStroke = None
 
-    def cmykFill(self,
-                c: float | None = None,
-                m: float | None = None,
-                y: float | None = None,
-                k: float | None = None,
-                alpha: float = 1
-        ):
+    def cmykFill(self, *cmykFill):
         """
         Set a fill using a CMYK color before drawing a shape. This is handy if the file is intended for print.
 
         Sets the CMYK fill color. Each value must be a float between 0.0 and 1.0.
         """
-        if c is None:
+        if cmykFill and cmykFill[0] is None:
             cmykFill = None
-        else:
-            cmykFill = c, m, y, k, alpha
         self._cmykFill = cmykFill
         self._fill = None
 
-    def cmykStroke(self,
-                  c: float | None = None,
-                  m: float | None = None,
-                  y: float | None = None,
-                  k: float | None = None,
-                  alpha: float = 1
-        ):
+    def cmykStroke(self, *cmykStroke):
         """
         Set a stroke using a CMYK color before drawing a shape. This is handy if the file is intended for print.
 
         Sets the CMYK stroke color. Each value must be a float between 0.0 and 1.0.
         """
-        if c is None:
+        if cmykStroke and cmykStroke[0] is None:
             cmykStroke = None
-        else:
-            cmykStroke = c, m, y, k, alpha
         self._cmykStroke = cmykStroke
         self._stroke = None
 
-    def strokeWidth(self, strokeWidth: float):
+    def strokeWidth(self, strokeWidth):
         """
         Sets stroke width.
         """
         self._strokeWidth = strokeWidth
 
-    def align(self, align: str):
+    def align(self, align):
         """
         Sets the text alignment.
         Possible `align` values are: `left`, `center` and `right`.
         """
         self._align = align
 
-    def lineHeight(self, lineHeight: float):
+    def lineHeight(self, lineHeight):
         """
         Set the line height.
         """
         self._lineHeight = lineHeight
 
-    def tracking(self, tracking: float):
+    def tracking(self, tracking):
         """
         Set the tracking between characters. It adds an absolute number of
         points between the characters.
         """
         self._tracking = tracking
 
-    def baselineShift(self, baselineShift: float):
+    def baselineShift(self, baselineShift):
         """
         Set the shift of the baseline.
         """
         self._baselineShift = baselineShift
 
-    def underline(self, underline: str | None):
+    def underline(self, underline):
         """
         Set the underline value.
         Underline must be `single`, `thick`, `double` or `None`.
         """
-        if underline is not None and underline not in self._textUnderlineMap:
-            raise DrawBotError("underline must be %s" % (", ".join(sorted(self._textUnderlineMap.keys()))))
         self._underline = underline
 
-    def strikethrough(self, strikethrough: str | None):
-        """
-        Set the strikethrough value.
-        Strikethrough must be `single`, `thick`, `double` or `None`.
-        """
-        if strikethrough is not None and strikethrough not in self._textstrikethroughMap:
-            raise DrawBotError("strikethrough must be %s" % (", ".join(sorted(self._textstrikethroughMap.keys()))))
-        self._strikethrough = strikethrough
-
-    def url(self, url: str | None):
+    def url(self, url):
         """
         set the url value.
         url must be a string or `None`
         """
         self._url = url
 
-    def openTypeFeatures(self, *args: None, **features: bool) -> dict[str, bool]:
+    def openTypeFeatures(self, *args, **features):
         """
         Enable OpenType features and return the current openType features settings.
 
@@ -1802,7 +1581,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             self._openTypeFeatures.update(features)
         return dict(self._openTypeFeatures)
 
-    def listOpenTypeFeatures(self, fontNameOrPath: SomePath | None = None, fontNumber: int = 0) -> list[str]:
+    def listOpenTypeFeatures(self, fontNameOrPath=None, fontNumber=0):
         """
         List all OpenType feature tags for the current font.
 
@@ -1813,7 +1592,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         font = getNSFontFromNameOrPath(fontNameOrPath, 10, fontNumber)
         return openType.getFeatureTagsForFont(font)
 
-    def fontVariations(self, *args: None, **axes: float | bool) -> dict[str, float]:
+    def fontVariations(self, *args, **axes):
         """
         Pick a variation by axes values and return the current font variations settings.
 
@@ -1837,7 +1616,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         currentVariation.update(self._fontVariations)
         return currentVariation
 
-    def listFontVariations(self, fontNameOrPath: SomePath | None = None, fontNumber: int = 0) -> dict[str, dict]:
+    def listFontVariations(self, fontNameOrPath=None, fontNumber=0):
         """
         List all variation axes for the current font.
 
@@ -1851,26 +1630,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         font = getNSFontFromNameOrPath(fontNameOrPath, 10, fontNumber)
         return variation.getVariationAxesForFont(font)
 
-    def fontNamedInstance(self, name: str, fontNameOrPath: str | SomePath | None = None):
-        """
-        Set a font with `name` of a named instance.
-        The `name` of the named instance must be listed in `listNamedInstances()`,
-
-        Optionally a `fontNameOrPath` can be given. If a font path is given that `fontNameOrPath` will be set.
-        """
-        if fontNameOrPath:
-            self.font(fontNameOrPath)
-        instances = self.listNamedInstances()
-        if name in instances:
-            self.fontVariations(**instances[name])
-        else:
-            font = getNSFontFromNameOrPath(self._font, self._fontSize, self._fontNumber)
-            fontName: SomePath | None = getFontName(font)
-            if fontName is None:
-                fontName = self._font
-            raise DrawBotError(f"Can not find instance with name: '{name}' for '{fontName}'.")
-
-    def listNamedInstances(self, fontNameOrPath: SomePath | None = None, fontNumber: int = 0) -> dict[str, dict]:
+    def listNamedInstances(self, fontNameOrPath=None, fontNumber=0):
         """
         List all named instances from a variable font for the current font.
 
@@ -1884,7 +1644,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         font = getNSFontFromNameOrPath(fontNameOrPath, 10, fontNumber)
         return variation.getNamedInstancesForFont(font)
 
-    def tabs(self, tab: tuple[float, str] | None, *tabs: tuple[float, str]):
+    def tabs(self, *tabs):
         """
         Set tabs,tuples of (`float`, `alignment`)
         Aligment can be `"left"`, `"center"`, `"right"` or any other character.
@@ -1901,14 +1661,12 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             # draw the string
             text(t, (10, 10))
         """
-        if tab is None:
+        if tabs and tabs[0] is None:
             self._tabs = None
         else:
-            combinedTabs: list[tuple[float, str]] = [tab]
-            combinedTabs.extend(tabs)
-            self._tabs = combinedTabs
+            self._tabs = tabs
 
-    def indent(self, indent: float):
+    def indent(self, indent):
         """
         Set indent of text left of the paragraph.
 
@@ -1981,7 +1739,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         """
         self._indent = indent
 
-    def tailIndent(self, indent: float):
+    def tailIndent(self, indent):
         """
         Set indent of text right of the paragraph.
 
@@ -1990,43 +1748,33 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         """
         self._tailIndent = indent
 
-    def firstLineIndent(self, indent: float):
+    def firstLineIndent(self, indent):
         """
         Set indent of the text only for the first line.
         """
         self._firstLineIndent = indent
 
-    def paragraphTopSpacing(self, value: float):
+    def paragraphTopSpacing(self, value):
         """
         set paragraph spacing at the top.
         """
         self._paragraphTopSpacing = value
 
-    def paragraphBottomSpacing(self, value: float):
+    def paragraphBottomSpacing(self, value):
         """
         set paragraph spacing at the bottom.
         """
         self._paragraphBottomSpacing = value
 
-    def language(self, language: str | None):
+    def language(self, language):
         """
         Set the preferred language as language tag or None to use the default language.
 
         `language()` will activate the `locl` OpenType features, if supported by the current font.
         """
-        if language is not None and not validateLanguageCode(language):
-            warnings.warn(f"Language '{language}' is not available.")
         self._language = language
 
-    def writingDirection(self, direction: str | None):
-        """
-        Set the writing direction: `None`, `'LTR'` or `'RTL'`.
-        """
-        if direction is not None and direction not in self._writingDirectionMap.keys():
-            raise DrawBotError("writing direction must be %s" % (", ".join(sorted(self._writingDirectionMap.keys()))))
-        self._writingDirection = direction
-
-    def size(self) -> tuple[float, float]:
+    def size(self):
         """
         Return the size of the text.
         """
@@ -2035,19 +1783,17 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
     def getNSObject(self):
         return self._attributedString
 
-    def copy(self) -> Self:
+    def copy(self):
         """
         Copy the formatted string.
         """
-        attributes = {
-            key: getattr(self, "_%s" % key) for key in self._formattedAttributes
-        }
+        attributes = {key: getattr(self, "_%s" % key) for key in self._formattedAttributes}
         new = self.__class__(**attributes)
         new._attributedString = self._attributedString.mutableCopy()
         new.copyContextProperties(self)
         return new
 
-    def fontContainsCharacters(self, characters: str) -> bool:
+    def fontContainsCharacters(self, characters):
         """
         Return a bool if the current font contains the provided `characters`.
         Characters is a string containing one or more characters.
@@ -2061,14 +1807,14 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         result, glyphs = CoreText.CTFontGetGlyphsForCharacters(font, characters, None, count)
         return result
 
-    def fontContainsGlyph(self, glyphName: str) -> bool:
+    def fontContainsGlyph(self, glyphName):
         font = self._getNSFontWithFallback()
         if font is None:
             return False
         glyph = font.glyphWithName_(glyphName)
         return bool(glyph)
 
-    def fontFilePath(self) -> SomePath | None:
+    def fontFilePath(self):
         """
         Return the path to the file of the current font.
         """
@@ -2084,7 +1830,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         warnings.warn("Cannot find the path to the font '%s'." % self._font)
         return None
 
-    def fontFileFontNumber(self) -> int:
+    def fontFileFontNumber(self):
         fontNumber = 0
         path = self.fontFilePath()
         if path is not None:
@@ -2097,11 +1843,11 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
                 warnings.warn(f"Cannot find the fontNumber for '{self._font}'.")
         return fontNumber
 
-    def listFontGlyphNames(self) -> list[str]:
+    def listFontGlyphNames(self):
         """
         Return a list of glyph names supported by the current font.
         """
-        from fontTools.ttLib import TTFont, TTLibError # type: ignore
+        from fontTools.ttLib import TTFont, TTLibError
 
         path = self.fontFilePath()
         if path is None:
@@ -2127,42 +1873,42 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
             glyphNames.remove(".notdef")
         return glyphNames
 
-    def fontAscender(self) -> float:
+    def fontAscender(self):
         """
         Returns the current font ascender, based on the current `font` and `fontSize`.
         """
         font = self._getNSFontWithFallback()
         return font.ascender()
 
-    def fontDescender(self) -> float:
+    def fontDescender(self):
         """
         Returns the current font descender, based on the current `font` and `fontSize`.
         """
         font = self._getNSFontWithFallback()
         return font.descender()
 
-    def fontXHeight(self) -> float:
+    def fontXHeight(self):
         """
         Returns the current font x-height, based on the current `font` and `fontSize`.
         """
         font = self._getNSFontWithFallback()
         return font.xHeight()
 
-    def fontCapHeight(self) -> float:
+    def fontCapHeight(self):
         """
         Returns the current font cap height, based on the current `font` and `fontSize`.
         """
         font = self._getNSFontWithFallback()
         return font.capHeight()
 
-    def fontLeading(self) -> float:
+    def fontLeading(self):
         """
         Returns the current font leading, based on the current `font` and `fontSize`.
         """
         font = self._getNSFontWithFallback()
         return font.leading()
 
-    def fontLineHeight(self) -> float:
+    def fontLineHeight(self):
         """
         Returns the current line height, based on the current `font` and `fontSize`.
         If a `lineHeight` is set, this value will be returned.
@@ -2172,7 +1918,7 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         font = self._getNSFontWithFallback()
         return font.defaultLineHeightForFont()
 
-    def appendGlyph(self, *glyphNames: str):
+    def appendGlyph(self, *glyphNames):
         """
         Append a glyph by his glyph name or glyph index using the current `font`.
         Multiple glyph names are possible.
@@ -2216,8 +1962,8 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         font = AppKit.NSFont.fontWithDescriptor_size_(fontDescriptor, self._fontSize)
 
         fallbackFont = self._fallbackFont
-        self._fallbackFont = None # type: ignore
-        _openTypeFeatures: dict[str, bool] = dict(self._openTypeFeatures)
+        self._fallbackFont = None
+        _openTypeFeatures = dict(self._openTypeFeatures)
         self._openTypeFeatures = dict(calt=False)
         for glyphName in glyphNames:
             if isinstance(glyphName, int):
@@ -2243,14 +1989,14 @@ class FormattedString(SVGContextPropertyMixin, ContextPropertyMixin):
         self._fallbackFont = fallbackFont
 
 
-class GraphicsState():
+class GraphicsState(object):
+
     _textClass = FormattedString
     _colorClass = Color
 
     def __init__(self):
         self.colorSpace = self._colorClass.colorSpace
         self.blendMode = None
-        self.opacity = 1
         self.fillColor = self._colorClass(0)
         self.strokeColor = None
         self.cmykFillColor = None
@@ -2259,7 +2005,6 @@ class GraphicsState():
         self.gradient = None
         self.strokeWidth = 1
         self.lineDash = None
-        self.lineDashOffset = 0
         self.lineCap = None
         self.lineJoin = None
         self.miterLimit = 10
@@ -2271,7 +2016,6 @@ class GraphicsState():
         new = self.__class__()
         new.colorSpace = self.colorSpace
         new.blendMode = self.blendMode
-        new.opacity = self.opacity
         if self.fillColor is not None:
             new.fillColor = self.fillColor.copy()
         else:
@@ -2294,7 +2038,6 @@ class GraphicsState():
         new.lineCap = self.lineCap
         if self.lineDash is not None:
             new.lineDash = list(self.lineDash)
-        new.lineDashOffset = self.lineDashOffset
         new.lineJoin = self.lineJoin
         new.miterLimit = self.miterLimit
         return new
@@ -2312,7 +2055,8 @@ class GraphicsState():
         self._colorClass.colorSpace = self.colorSpace
 
 
-class BaseContext():
+class BaseContext(object):
+
     _graphicsStateClass = GraphicsState
 
     _cmykColorClass = CMYKColor
@@ -2322,15 +2066,13 @@ class BaseContext():
     _bezierPathClass = BezierPath
     _gradientClass = Gradient
 
-    fileExtensions: list[str] = []
-    saveImageOptions: list[str] = []
+    fileExtensions = []
+    saveImageOptions = []
     validateSaveImageOptions = True
 
     _textAlignMap = FormattedString._textAlignMap
     _textTabAlignMap = FormattedString._textTabAlignMap
     _textUnderlineMap = FormattedString._textUnderlineMap
-    _textstrikethroughMap = FormattedString._textstrikethroughMap
-    _writingDirectionMap = FormattedString._writingDirectionMap
 
     _colorSpaceMap = dict(
         genericRGB=AppKit.NSColorSpace.genericRGBColorSpace(),
@@ -2391,9 +2133,6 @@ class BaseContext():
         pass
 
     def _blendMode(self, operation):
-        pass
-
-    def _opacity(self, value):
         pass
 
     def _drawPath(self):
@@ -2534,10 +2273,6 @@ class BaseContext():
         self._state.blendMode = operation
         self._blendMode(operation)
 
-    def opacity(self, value):
-        self._state.opacity = value
-        self._opacity(value)
-
     def fill(self, r, g=None, b=None, a=1):
         self._state.text.fill(r, g, b, a)
         self._state.cmykFillColor = None
@@ -2645,12 +2380,11 @@ class BaseContext():
             raise DrawBotError("lineCap() argument must be 'butt', 'square' or 'round'")
         self._state.lineCap = _LINECAPSTYLESMAP[cap]
 
-    def lineDash(self, dash, offset):
+    def lineDash(self, dash):
         if dash[0] is None:
             self._state.lineDash = None
             return
         self._state.lineDash = list(dash)
-        self._state.lineDashOffset = offset
 
     def transform(self, matrix):
         self._transform(matrix)
@@ -2676,9 +2410,6 @@ class BaseContext():
     def underline(self, underline):
         self._state.text.underline(underline)
 
-    def strikethrough(self, strikethrough):
-        self._state.text.strikethrough(strikethrough)
-
     def url(self, value):
         self._state.text.url(value)
 
@@ -2691,17 +2422,11 @@ class BaseContext():
     def language(self, language):
         self._state.text.language(language)
 
-    def writingDirection(self, direction):
-        self._state.text.writingDirection(direction)
-
-    def openTypeFeatures(self, *args: None, **features: dict[str, bool]) -> dict[str, bool]:
+    def openTypeFeatures(self, *args, **features):
         return self._state.text.openTypeFeatures(*args, **features)
 
     def fontVariations(self, *args, **axes):
         return self._state.text.fontVariations(*args, **axes)
-
-    def fontNamedInstance(self, name, fontNameOrPath):
-        self._state.text.fontNamedInstance(name, fontNameOrPath)
 
     def attributedString(self, txt, align=None):
         if isinstance(txt, FormattedString):
@@ -2965,7 +2690,7 @@ def _getNSFontFromNameOrPath(fontNameOrPath, fontSize, fontNumber):
 # a maximum size, using Python 3.7's insertion order preserving dict
 # behavior, but it may not be worth the effort.
 #
-_reloadedFontDescriptors: dict[SomePath, tuple[float, Any]] = {}
+_reloadedFontDescriptors = {}
 
 
 @memoize
@@ -2992,7 +2717,7 @@ def getFontDescriptorsFromPath(fontPath):
     return descriptors
 
 
-def getFontName(font) -> str | None:
+def getFontName(font):
     if font is None:
         return None
     fontName = CoreText.CTFontDescriptorCopyAttribute(font.fontDescriptor(), CoreText.kCTFontNameAttribute)

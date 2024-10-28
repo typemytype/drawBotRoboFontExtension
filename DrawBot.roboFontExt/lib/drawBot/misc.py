@@ -197,30 +197,11 @@ def nsStringLength(s):
     return len(s.encode("utf-16-be")) // 2
 
 
-# ===================
-# = language tools  =
-# ===================
-
-def canonicalLocaleCode(localeCode):
-    parsedLoc = AppKit.NSLocale.componentsFromLocaleIdentifier_(localeCode)
-    parts = [
-        parsedLoc[AppKit.kCFLocaleLanguageCode],
-        parsedLoc.get(AppKit.kCFLocaleScriptCode),
-        parsedLoc.get(AppKit.kCFLocaleCountryCode),
-    ]
-    return "_".join(part for part in parts if part)
-
-
-def validateLanguageCode(localeCode):
-    localeCode = canonicalLocaleCode(localeCode)
-    return localeCode in AppKit.NSLocale.availableLocaleIdentifiers()
-
-
 # ============
 # = warnings =
 # ============
 
-class Warnings():
+class Warnings(object):
 
     def __init__(self):
         self._warnMessages = set()
@@ -241,7 +222,7 @@ class Warnings():
 warnings = Warnings()
 
 
-class VariableController():
+class VariableController(object):
 
     def __init__(self, attributes, callback, document=None, continuous=True):
         import vanilla
