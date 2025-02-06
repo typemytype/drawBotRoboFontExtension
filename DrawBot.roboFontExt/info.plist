@@ -46,12 +46,12 @@
 	<key>name</key>
 	<string>DrawBot</string>
 	<key>requiresVersionMajor</key>
-	<string>1</string>
+	<string>4</string>
 	<key>requiresVersionMinor</key>
-	<string>8</string>
+	<string>5</string>
 	<key>timeStamp</key>
 	<real>1417707288.332471</real>
 	<key>version</key>
-	<string>3.130.3</string>
+	<string>3.131</string>
 </dict>
 </plist>

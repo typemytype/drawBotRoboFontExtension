@@ -197,11 +197,30 @@ def nsStringLength(s):
     return len(s.encode("utf-16-be")) // 2
 
 
+# ===================
+# = language tools  =
+# ===================
+
+def canonicalLocaleCode(localeCode):
+    parsedLoc = AppKit.NSLocale.componentsFromLocaleIdentifier_(localeCode)
+    parts = [
+        parsedLoc[AppKit.kCFLocaleLanguageCode],
+        parsedLoc.get(AppKit.kCFLocaleScriptCode),
+        parsedLoc.get(AppKit.kCFLocaleCountryCode),
+    ]
+    return "_".join(part for part in parts if part)
+
+
+def validateLanguageCode(localeCode):
+    localeCode = canonicalLocaleCode(localeCode)
+    return localeCode in AppKit.NSLocale.availableLocaleIdentifiers()
+
+
 # ============
 # = warnings =
 # ============
 
-class Warnings(object):
+class Warnings:
 
     def __init__(self):
         self._warnMessages = set()
@@ -222,7 +241,7 @@ class Warnings(object):
 warnings = Warnings()
 
 
-class VariableController(object):
+class VariableController:
 
     def __init__(self, attributes, callback, document=None, continuous=True):
         import vanilla
@@ -344,8 +363,7 @@ def getExternalToolPath(root, toolName):
     if not os.path.exists(toolPath):
         toolPath = AppKit.NSBundle.mainBundle().pathForResource_ofType_(toolName, None)
         if toolPath is None or not os.path.exists(toolPath):
-            import drawBot
-            root = os.path.dirname(drawBot.__file__)
+            root = os.path.dirname(__file__)
             toolPath = os.path.join(root, "..", "Resources", "externalTools", toolName)
     return toolPath
 

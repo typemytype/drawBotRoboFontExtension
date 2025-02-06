@@ -1,7 +1,6 @@
 from Foundation import NSURL
 from AppKit import NSDragOperationNone, NSBezelBorder
 from Quartz import PDFView, PDFThumbnailView, PDFDocument
-
 from objc import super
 
 from vanilla import Group
@@ -26,7 +25,7 @@ class ThumbnailView(Group):
         try:
             # sometimes this goes weirdly wrong...
             selection = self.getNSView().selectedPages()
-        except Exception:
+        except:
             return -1
         if selection:
             for page in selection:
@@ -44,7 +43,7 @@ class DrawBotPDFView(PDFView):
         # DrawBot[15705]: -[__NSCFConstantString characterAtIndex:]: Range or index out of bounds
         try:
             return super(DrawBotPDFView, self).performKeyEquivalent_(event)
-        except Exception:
+        except:
             return False
 
 
@@ -103,7 +102,7 @@ class DrawView(Group):
                 # sometimes this goes weirdly wrong...
                 page = pdf.pageAtIndex_(index)
                 self.getNSView().goToPage_(page)
-            except Exception:
+            except:
                 self.scrollDown()
         else:
             self.scrollDown()
