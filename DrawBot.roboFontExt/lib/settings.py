@@ -19,4 +19,5 @@ class DrawBotSettingsController(object):
         setExtensionDefault("com.drawBot.openPyFileDirectly", sender.get())
 
 
-DrawBotSettingsController()
+if __name__ == "__main__":
+    DrawBotSettingsController()
