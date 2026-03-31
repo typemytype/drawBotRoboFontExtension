@@ -1,17 +1,19 @@
-from vanilla import *
+import vanilla
 
 from mojo.extensions import getExtensionDefault, setExtensionDefault
 
 
-class DrawBotSettingsController(object):
+class DrawBotPreferencesController(object):
 
     def __init__(self):
-        self.w = Window((250, 45), "DrawBot Settings")
+        self.w = vanilla.Window((250, 45), "DrawBot Settings")
 
-        self.w.openPythonFilesInDrawBot = CheckBox((10, 10, -10, 22),
+        self.w.openPythonFilesInDrawBot = vanilla.CheckBox(
+            (10, 10, -10, 22),
             "Open .py files directly in DrawBot.",
             value=getExtensionDefault("com.drawBot.openPyFileDirectly", False),
-            callback=self.openPythonFilesInDrawBotCallback)
+            callback=self.openPythonFilesInDrawBotCallback
+        )
 
         self.w.open()
 
@@ -19,4 +21,4 @@ class DrawBotSettingsController(object):
         setExtensionDefault("com.drawBot.openPyFileDirectly", sender.get())
 
 
-DrawBotSettingsController()
+DrawBotPreferencesController()
