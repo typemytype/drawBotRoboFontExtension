@@ -17,7 +17,7 @@
 		</dict>
 		<dict>
 			<key>path</key>
-			<string>settings.py</string>
+			<string>drawBotPreferences.py</string>
 			<key>preferredName</key>
 			<string>Settings</string>
 			<key>shortKey</key>
